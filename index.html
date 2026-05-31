@@ -4627,12 +4627,20 @@
     
     // Utilisateurs autorisés (DEMO)
     const UTILISATEURS_AUTORISE = {
-        'gaston@premium.com': 'Gaston2026',
-        'yolande@premium.com': 'Yolande2026',
-        'mariette@premium.com': 'Mariette2026'
+        'gaston@premium.com': 'password',
+        'yolande@premium.com': 'yolande123',
+        'mariette@premium.com': 'mariette123'
+    };
+    
+    // Rôles utilisateurs (définit accès application)
+    const ROLES_UTILISATEURS = {
+        'gaston@premium.com': 'admin',           // ✅ Admin complet - tout faire
+        'yolande@premium.com': 'superviseur',    // ⚠️ Superviseur - voir tout sauf modifier passwords
+        'mariette@premium.com': 'superviseur'    // ⚠️ Superviseur - voir tout sauf modifier passwords
     };
     
     let utilisateurConnecte = null;
+    let roleUtilisateur = null;
     let firebaseDb = null;
     
     /**
@@ -4687,19 +4695,21 @@
         
         // Connexion réussie
         utilisateurConnecte = email;
+        roleUtilisateur = ROLES_UTILISATEURS[email] || 'utilisateur';
         localStorage.setItem('utilisateur', email);
         localStorage.setItem('nomUtilisateur', email.split('@')[0]);
+        localStorage.setItem('roleUtilisateur', roleUtilisateur);
         
         // Afficher interface
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appContainer').style.display = 'block';
         document.getElementById('userInfo').style.display = 'flex';
-        document.getElementById('userName').textContent = email.split('@')[0].toUpperCase();
+        document.getElementById('userName').textContent = email.split('@')[0].toUpperCase() + ' (' + roleUtilisateur + ')';
         
         // Initialiser app
         initialiserFirebase();
         chargerDonneesLocales();
-        console.log(`✅ Connecté : ${email}`);
+        console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateur}`);
     }
     
     /**
