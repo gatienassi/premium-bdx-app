@@ -1053,8 +1053,10 @@
                         <button class="btn btn-success" onclick="exporterDonnees('excel')">📊 Export Excel</button>
                         <button class="btn btn-success" onclick="exporterDonnees('csv')">📄 Export CSV</button>
                         <button class="btn btn-primary" onclick="document.getElementById('importFile').click()">📥 Importer Données</button>
+                        <button class="btn btn-info" onclick="document.getElementById('importBDXFile').click()">📥 Importer BDX Excel</button>
                         <button class="btn btn-warning" onclick="afficherHistoriqueModifications()">📜 Historique Modifications</button>
                         <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importerDonnees(event)">
+                        <input type="file" id="importBDXFile" accept=".csv,.xlsx,.xls" style="display: none;" onchange="importerBDXExcel(event)">
                     </div>
                     <div class="alert alert-info" style="font-size: 13px;">
                         <span>ℹ️</span>
@@ -4627,9 +4629,9 @@
     
     // Utilisateurs autorisés (DEMO)
     const UTILISATEURS_AUTORISE = {
-        'gaston@premium.com': 'Gaston2026',
-        'yolande@premium.com': 'Yolande2026',
-        'mariette@premium.com': 'Mariette2026'
+        'gaston@premium.com': 'password',
+        'yolande@premium.com': 'yolande123',
+        'mariette@premium.com': 'mariette123'
     };
     
     // Rôles utilisateurs (définit accès application)
@@ -4857,6 +4859,306 @@
             reader.readAsText(file);
         };
         input.click();
+    }
+    
+    /**
+     * Importer BDX depuis fichier Excel/CSV
+     */
+    function importerBDXExcel(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const fileName = file.name.toLowerCase();
+        
+        if (fileName.endsWith('.csv')) {
+            importerBDXCSV(file);
+        } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+            importerBDXExcelFile(file);
+        } else {
+            alert('❌ Format non supporté. Utilisez CSV ou Excel (.xlsx)');
+        }
+        
+        // Réinitialiser le fichier d'entrée
+        event.target.value = '';
+    }
+    
+    /**
+     * Importer BDX depuis CSV
+     */
+    function importerBDXCSV(file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const csv = event.target.result;
+                const lines = csv.split('\n');
+                
+                if (lines.length < 2) {
+                    alert('❌ Fichier CSV vide ou invalide');
+                    return;
+                }
+                
+                // En-têtes
+                const headers = lines[0].split(',').map(h => h.trim());
+                const contractsImportes = [];
+                let errors = [];
+                
+                // Vérifier colonnes obligatoires
+                const colonnesObligatoires = ['compagnie', 'typeAssurance', 'nomClient', 'police', 'dateEffet', 'dateEcheance', 'primeNette', 'taxe', 'primeTTC'];
+                const colonnesManquantes = colonnesObligatoires.filter(col => !headers.includes(col));
+                
+                if (colonnesManquantes.length > 0) {
+                    alert(`❌ Colonnes manquantes : ${colonnesManquantes.join(', ')}`);
+                    return;
+                }
+                
+                // Traiter chaque ligne
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    
+                    const values = line.split(',').map(v => v.trim());
+                    const row = {};
+                    
+                    headers.forEach((header, idx) => {
+                        row[header] = values[idx] || '';
+                    });
+                    
+                    try {
+                        const contrat = traiterLigneImportBDX(row, i + 1);
+                        if (contrat) {
+                            contractsImportes.push(contrat);
+                        }
+                    } catch (error) {
+                        errors.push(`Ligne ${i + 1} : ${error.message}`);
+                    }
+                }
+                
+                // Confirmation et import
+                if (contractsImportes.length > 0) {
+                    const msg = `Importer ${contractsImportes.length} BDX ?${errors.length > 0 ? `\n\n⚠️ ${errors.length} erreur(s) ignorées` : ''}`;
+                    
+                    if (confirm(msg)) {
+                        // Ajouter les contrats importés
+                        contrats = [...contrats, ...contractsImportes];
+                        sauvegarderDonnees();
+                        sauvegarderDonneesCloud();
+                        
+                        actualiserListeContrats();
+                        actualiserAffichage();
+                        
+                        let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
+                        if (errors.length > 0) {
+                            msgSuccess += `\n\n⚠️ ${errors.length} lignes ignorées :\n${errors.slice(0, 5).join('\n')}`;
+                            if (errors.length > 5) msgSuccess += `\n... et ${errors.length - 5} autres`;
+                        }
+                        
+                        alert(msgSuccess);
+                        console.log(`✅ ${contractsImportes.length} BDX importés`);
+                    }
+                } else {
+                    alert('❌ Aucun BDX valide trouvé');
+                }
+            } catch (error) {
+                alert('❌ Erreur lors de la lecture du fichier :\n' + error.message);
+            }
+        };
+        reader.readAsText(file);
+    }
+    
+    /**
+     * Importer BDX depuis Excel
+     */
+    function importerBDXExcelFile(file) {
+        // Vérifier si SheetJS est disponible
+        if (typeof XLSX === 'undefined') {
+            // Charger SheetJS dynamiquement
+            const script = document.createElement('script');
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js';
+            script.onload = () => {
+                lireExcelAvecXLSX(file);
+            };
+            script.onerror = () => {
+                alert('❌ Impossible de charger la bibliothèque Excel.\nVeuillez utiliser le format CSV à la place.');
+            };
+            document.head.appendChild(script);
+        } else {
+            lireExcelAvecXLSX(file);
+        }
+    }
+    
+    /**
+     * Lire Excel avec XLSX
+     */
+    function lireExcelAvecXLSX(file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const workbook = XLSX.read(event.target.result, { type: 'binary' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(firstSheet);
+                
+                if (rows.length === 0) {
+                    alert('❌ Feuille Excel vide');
+                    return;
+                }
+                
+                const contractsImportes = [];
+                let errors = [];
+                
+                // Traiter chaque ligne
+                rows.forEach((row, idx) => {
+                    try {
+                        const contrat = traiterLigneImportBDX(row, idx + 2);
+                        if (contrat) {
+                            contractsImportes.push(contrat);
+                        }
+                    } catch (error) {
+                        errors.push(`Ligne ${idx + 2} : ${error.message}`);
+                    }
+                });
+                
+                // Confirmation et import
+                if (contractsImportes.length > 0) {
+                    const msg = `Importer ${contractsImportes.length} BDX ?${errors.length > 0 ? `\n\n⚠️ ${errors.length} erreur(s) ignorées` : ''}`;
+                    
+                    if (confirm(msg)) {
+                        contrats = [...contrats, ...contractsImportes];
+                        sauvegarderDonnees();
+                        sauvegarderDonneesCloud();
+                        
+                        actualiserListeContrats();
+                        actualiserAffichage();
+                        
+                        let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
+                        if (errors.length > 0) {
+                            msgSuccess += `\n\n⚠️ ${errors.length} lignes ignorées :\n${errors.slice(0, 5).join('\n')}`;
+                            if (errors.length > 5) msgSuccess += `\n... et ${errors.length - 5} autres`;
+                        }
+                        
+                        alert(msgSuccess);
+                    }
+                } else {
+                    alert('❌ Aucun BDX valide trouvé');
+                }
+            } catch (error) {
+                alert('❌ Erreur lors de la lecture du fichier Excel :\n' + error.message);
+            }
+        };
+        reader.readAsBinaryString(file);
+    }
+    
+    /**
+     * Traiter une ligne d'import BDX
+     */
+    function traiterLigneImportBDX(row, numeroLigne) {
+        // Valider compagnie
+        if (!row.compagnie || !Object.keys(COMPAGNIES).includes(row.compagnie)) {
+            throw new Error(`Compagnie invalide : "${row.compagnie}"`);
+        }
+        
+        // Valider type assurance
+        if (!row.typeAssurance) {
+            throw new Error('Type d\'assurance manquant');
+        }
+        
+        // Valider client
+        if (!row.nomClient) {
+            throw new Error('Nom client manquant');
+        }
+        
+        // Valider police
+        if (!row.police) {
+            throw new Error('N° police manquant');
+        }
+        
+        // Valider dates
+        const dateEffet = convertirDateBDX(row.dateEffet);
+        const dateEcheance = convertirDateBDX(row.dateEcheance);
+        
+        if (!dateEffet || !dateEcheance) {
+            throw new Error('Dates invalides (format attendu : JJ/MM/YYYY)');
+        }
+        
+        // Valider montants
+        const primeNette = parseInt(row.primeNette) || 0;
+        const taxe = parseInt(row.taxe) || 0;
+        const primeTTC = parseInt(row.primeTTC) || 0;
+        const montantPercu = parseInt(row.montantPercu) || primeTTC;
+        
+        if (primeNette <= 0 || primeTTC <= 0) {
+            throw new Error('Montants invalides (doivent être > 0)');
+        }
+        
+        // Récupérer taux commission
+        const tauxCommission = TAUX_COMMISSION[row.compagnie] || 20;
+        const tauxBonus = TAUX_BONUS[row.compagnie] || 0;
+        
+        // Calculer commissions
+        const commissionBase = Math.round(primeTTC * tauxCommission / 100);
+        const bonus = tauxBonus > 0 ? Math.round(commissionBase * tauxBonus / 100) : 0;
+        const commissionTotale = commissionBase + bonus;
+        
+        // Créer contrat
+        const contrat = {
+            id: Date.now() + Math.random(),
+            compagnie: row.compagnie,
+            typeAssurance: row.typeAssurance,
+            nomClient: row.nomClient,
+            police: row.police,
+            avenant: row.avenant || '',
+            immatriculation: row.immatriculation || '',
+            dateEffet: dateEffet,
+            dateEcheance: dateEcheance,
+            primeNette: primeNette,
+            accessoires: parseInt(row.accessoires) || 0,
+            taxe: taxe,
+            primeTTC: primeTTC,
+            montantPercu: montantPercu,
+            modeReglement: row.modeReglement || 'Cheque',
+            tauxCommission: tauxCommission,
+            tauxBonus: tauxBonus,
+            commissionBase: commissionBase,
+            bonus: bonus,
+            commissionTotale: commissionTotale,
+            commissionDeduite: false,
+            primeAReverser: primeTTC,
+            dateCreation: new Date().toISOString(),
+            regle: row.regle === 'TRUE' || row.regle === 'true' || row.regle === '1',
+            dateBDX: row.dateBDX ? convertirDateBDX(row.dateBDX) : null,
+            numeroBDX: row.numeroBDX || null,
+            preuveType: null,
+            preuveNumero: null,
+            dateReglement: row.dateReglement ? convertirDateBDX(row.dateReglement) : null,
+            archive: false,
+            commissionRecue: false,
+            dateCommissionRecue: null,
+            montantCommissionRecue: null,
+            referenceCommissionRecue: null,
+            notesCommission: row.notes || ''
+        };
+        
+        return contrat;
+    }
+    
+    /**
+     * Convertir date format JJ/MM/YYYY
+     */
+    function convertirDateBDX(dateStr) {
+        if (!dateStr) return null;
+        
+        const parts = dateStr.split('/');
+        if (parts.length !== 3) return null;
+        
+        const jour = parseInt(parts[0]);
+        const mois = parseInt(parts[1]);
+        const annee = parseInt(parts[2]);
+        
+        if (jour < 1 || jour > 31 || mois < 1 || mois > 12 || annee < 2000) {
+            return null;
+        }
+        
+        const date = new Date(annee, mois - 1, jour);
+        return date.toISOString().split('T')[0];
     }
     
     /**
