@@ -4628,10 +4628,10 @@
     };
     
     // Utilisateurs autorisés (DEMO)
-    const  = {
-        'gaston@premium.com': 'password',
-        'yolande@premium.com': 'yolande123',
-        'mariette@premium.com': 'mariette123'
+    const UTILISATEURS_AUTORISE = {
+        'gaston@premium.com': 'Gaston2026',
+        'yolande@premium.com': 'Yolande2026',
+        'mariette@premium.com': 'Mariette2026'
     };
     
     // Rôles utilisateurs (définit accès application)
@@ -4688,7 +4688,7 @@
             return;
         }
         
-        if ([email] !== password) {
+        if (UTILISATEURS_AUTORISE[email] !== password) {
             errorDiv.textContent = '❌ Email ou mot de passe incorrect';
             errorDiv.style.display = 'block';
             document.getElementById('loginPassword').value = '';
@@ -5166,7 +5166,7 @@
      */
     window.addEventListener('load', () => {
         const utilisateur = localStorage.getItem('utilisateur');
-        if (utilisateur && [utilisateur]) {
+        if (utilisateur && UTILISATEURS_AUTORISE[utilisateur]) {
             utilisateurConnecte = utilisateur;
             document.getElementById('loginScreen').style.display = 'none';
             document.getElementById('appContainer').style.display = 'block';
