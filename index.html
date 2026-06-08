@@ -4900,8 +4900,14 @@
                     return;
                 }
                 
-                // En-têtes
-                const headers = lines[0].split(',').map(h => h.trim());
+                // En-têtes - Détecter automatiquement le séparateur
+                let separator = ',';
+                if (lines[0].includes(';') && !lines[0].includes(',')) {
+                    separator = ';';
+                } else if (lines[0].includes('\t') && !lines[0].includes(',') && !lines[0].includes(';')) {
+                    separator = '\t';
+                }
+                const headers = lines[0].split(separator).map(h => h.trim());
                 const contractsImportes = [];
                 let errors = [];
                 
@@ -4919,7 +4925,7 @@
                     const line = lines[i].trim();
                     if (!line) continue;
                     
-                    const values = line.split(',').map(v => v.trim());
+                    const values = line.split(separator).map(v => v.trim());
                     const row = {};
                     
                     headers.forEach((header, idx) => {
@@ -5083,7 +5089,7 @@
      */
     function traiterLigneImportBDX(row, numeroLigne) {
         // Valider compagnie
-        if (!row.compagnie || !Object.keys(COMPAGNIES).includes(row.compagnie)) {
+        if (!row.compagnie || !COMPAGNIES.includes(row.compagnie)) {
             throw new Error(`Compagnie invalide : "${row.compagnie}"`);
         }
         
