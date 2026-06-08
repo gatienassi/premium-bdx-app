@@ -11,6 +11,7 @@
     <!-- jsPDF & Docx -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js"></script>
     <style>
@@ -4973,15 +4974,43 @@
     function importerBDXExcelFile(file) {
         // Vérifier si SheetJS est disponible
         if (typeof XLSX === 'undefined') {
-            // Charger SheetJS dynamiquement
+            // Charger SheetJS dynamiquement avec CDN fiable
             const script = document.createElement('script');
-            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.min.js';
+            script.async = true;
+            
+            // Essayer unpkg d'abord (plus fiable), puis cdnjs, puis jsDelivr
+            const cdnUrls = [
+                'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js',
+                'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+            ];
+            
+            let cdnIndex = 0;
+            
             script.onload = () => {
+                console.log('✅ SheetJS chargé avec succès');
                 lireExcelAvecXLSX(file);
             };
+            
             script.onerror = () => {
-                alert('❌ Impossible de charger la bibliothèque Excel.\nVeuillez utiliser le format CSV à la place.');
+                console.error(`❌ Erreur CDN ${cdnIndex + 1}/${cdnUrls.length}`);
+                
+                if (cdnIndex < cdnUrls.length - 1) {
+                    // Essayer prochain CDN
+                    cdnIndex++;
+                    script.src = cdnUrls[cdnIndex];
+                    console.log(`📡 Essai CDN suivant : ${cdnUrls[cdnIndex]}`);
+                    document.head.appendChild(script);
+                } else {
+                    // Tous les CDN ont échoué
+                    console.error('❌ Tous les CDN ont échoué');
+                    alert('❌ Impossible de charger la bibliothèque Excel.\n\nSolution : Utilisez plutôt le format CSV\n\n1. Ouvrir le fichier Excel dans votre application\n2. Fichier → Enregistrer sous\n3. Format : CSV (séparé par des virgules)\n4. Réimporter le fichier CSV');
+                }
             };
+            
+            // Démarrer avec le premier CDN
+            script.src = cdnUrls[cdnIndex];
+            console.log(`📡 Chargement SheetJS depuis : ${cdnUrls[cdnIndex]}`);
             document.head.appendChild(script);
         } else {
             lireExcelAvecXLSX(file);
