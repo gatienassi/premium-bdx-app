@@ -4643,6 +4643,10 @@
         'yolande@premium.com': 'superviseur',    // ⚠️ Superviseur - voir tout sauf modifier passwords
         'mariette@premium.com': 'superviseur'    // ⚠️ Superviseur - voir tout sauf modifier passwords
     };
+
+    // Chemin Firebase COMMUN : Gaston, Yolande et Mariette partagent les mêmes données
+    // (contrats, BDX générés) quel que soit le poste depuis lequel ils se connectent.
+    const FIREBASE_PATH_PARTAGE_BDX = 'bdxRoutine/partage';
     
     let utilisateurConnecte = null;
     let roleUtilisateur = null;
@@ -4740,11 +4744,13 @@
     
     /**
      * Synchroniser données avec Firebase Cloud
+     * Toutes les personnes connectées (Gaston, Yolande, Mariette) lisent/écrivent
+     * sur le MÊME chemin partagé : elles voient les mêmes contrats et BDX, peu importe le poste.
      */
     function synchroniserDonneesCloud() {
         if (!firebaseDb) return;
         
-        const chemin = `utilisateurs/${utilisateurConnecte}`;
+        const chemin = FIREBASE_PATH_PARTAGE_BDX;
         
         // Écouter changements cloud
         firebaseDb.ref(chemin).on('value', (snapshot) => {
@@ -4752,8 +4758,11 @@
             if (donnees) {
                 contrats = donnees.contrats || [];
                 bdxGeneres = donnees.bdxGeneres || [];
-                console.log('✅ Données synchronisées depuis cloud');
+                console.log('✅ Données partagées synchronisées depuis le cloud');
                 actualiserAffichage();
+            } else {
+                // Rien sur le cloud encore : on y pousse l'état local actuel (première utilisation)
+                sauvegarderDonneesCloud();
             }
         });
         
@@ -4764,7 +4773,7 @@
     }
     
     /**
-     * Sauvegarder données sur Firebase Cloud
+     * Sauvegarder données sur Firebase Cloud (chemin partagé)
      */
     function sauvegarderDonneesCloud() {
         if (!firebaseDb || !utilisateurConnecte) return;
@@ -4774,11 +4783,11 @@
                 contrats: contrats,
                 bdxGeneres: bdxGeneres,
                 derniereMiseAJour: new Date().toISOString(),
-                utilisateur: utilisateurConnecte
+                parUtilisateur: utilisateurConnecte
             };
             
-            firebaseDb.ref(`utilisateurs/${utilisateurConnecte}`).set(donnees)
-                .then(() => console.log('☁️ Données sauvegardées cloud'))
+            firebaseDb.ref(FIREBASE_PATH_PARTAGE_BDX).set(donnees)
+                .then(() => console.log('☁️ Données partagées sauvegardées sur le cloud'))
                 .catch(err => console.warn('⚠️ Erreur cloud:', err.message));
         } catch (error) {
             console.warn('⚠️ Erreur sauvegarde cloud:', error.message);
