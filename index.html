@@ -4,10 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BDX Règlement - Premium Courtage Assur</title>
-    <!-- Firebase SDK (version "compat" : compatible avec les balises <script> classiques) -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
     <!-- jsPDF & Docx -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
@@ -4623,7 +4623,7 @@
     const FIREBASE_CONFIG = {
         apiKey: "AIzaSyDrZqaNt_nKHZpi6jgaoETEVqz0oRFeIx0",
         authDomain: "premium-bdx-app.firebaseapp.com",
-        databaseURL: "https://premium-bdx-app-default-rtdb.europe-west1.firebasedatabase.app",
+        databaseURL: "https://premium-bdx-app.firebaseio.com",
         projectId: "premium-bdx-app",
         storageBucket: "premium-bdx-app.appspot.com",
         messagingSenderId: "123456789",
