@@ -6,7 +6,6 @@
 <title>BDX Cycle Complet & Compte Courant — Multi-Cabinet v3.0 (Firebase)</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
 <script>
 // Vérifie si SheetJS a pu se charger (peut être bloqué par Chrome quand le fichier
@@ -269,8 +268,8 @@ body.mode-impression-rapport #zone-impression-rapport{ display:block!important; 
       <p style="color:#888;font-size:.8em;margin-top:3px;">Connexion requise — accès partagé Premium Courtage Assur &amp; Elite Assurances</p>
     </div>
     <div class="form-group" style="margin-bottom:11px;">
-      <label>Email</label>
-      <input type="email" id="login-email" placeholder="prenom@premium.com" style="width:100%;padding:9px 11px;">
+      <label>Nom d'utilisateur</label>
+      <input type="text" id="login-email" placeholder="gaston" style="width:100%;padding:9px 11px;" autocapitalize="off">
     </div>
     <div class="form-group" style="margin-bottom:14px;">
       <label>Mot de passe</label>
@@ -2154,12 +2153,14 @@ function fermerModal(id){ document.getElementById(id).classList.remove('open'); 
 document.addEventListener('click', e=>{ if(e.target.classList.contains('modal-overlay')) fermerModal(e.target.id); });
 
 // ===================================================================
-// FIREBASE — AUTHENTIFICATION & SYNCHRONISATION PARTAGÉE
+// CONNEXION & SYNCHRONISATION PARTAGÉE
 // ===================================================================
 // Même projet Firebase que les autres applications PCA (BDX Règlement,
-// Facturation GNA) : "premium-bdx-app". Authentification par email/mot de
-// passe (Firebase Auth classique), données partagées en lecture/écriture
-// pour tous les utilisateurs connectés (Gaston, Macoty, Anini...).
+// Facturation GNA) : "premium-bdx-app". Comme dans ces applications,
+// l'authentification est volontairement simple (identifiants codés ici,
+// pas de vrai compte Firebase Auth) — la sécurité d'accès aux données
+// repose sur les Firebase Rules du chemin partagé, ouvertes en lecture/
+// écriture pour quiconque connaît l'URL de l'app et un identifiant valide.
 const FIREBASE_CONFIG = {
   apiKey: "AIzaSyDrZqaNt_nKHZpi6jgaoETEVqz0oRFeIx0",
   authDomain: "premium-bdx-app.firebaseapp.com",
@@ -2170,9 +2171,16 @@ const FIREBASE_CONFIG = {
 
 const CHEMIN_PARTAGE = 'bdxCompteCourant/partage'; // racine de stockage partagé dans Realtime Database
 
+// Identifiants des 3 utilisateurs autorisés. Pour changer un mot de passe ou
+// ajouter une personne, modifier directement cette liste puis renvoyer le fichier.
+const UTILISATEURS_AUTORISES = {
+  'gaston': 'Gaston2026',
+  'macoty': 'Macoty2026',
+  'anini':  'Anini2026'
+};
+
 let firebaseApp = null;
 let firebaseDb = null;
-let firebaseAuth = null;
 let utilisateurConnecte = null;
 let firebasePret = false;
 let ecritureEnCoursDepuisFirebase = false; // évite les boucles d'écriture en retour
@@ -2188,37 +2196,26 @@ function initFirebase(){
   try{
     firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
     firebaseDb = firebase.database();
-    firebaseAuth = firebase.auth();
     firebasePret = true;
   }catch(e){
     console.error('Firebase indisponible :', e);
     document.getElementById('login-statut').textContent = "⚠️ Connexion au serveur partagé indisponible — vérifie ta connexion internet.";
     return;
   }
-
-  firebaseAuth.onAuthStateChanged(user => {
-    if(user){
-      utilisateurConnecte = user.email;
-      document.getElementById('ecran-connexion').style.display = 'none';
-      document.getElementById('app-content').style.display = 'block';
-      document.getElementById('utilisateur-connecte-label').textContent = utilisateurConnecte.split('@')[0];
-      demarrerSyncFirebase();
-      init();
-    } else {
-      utilisateurConnecte = null;
-      document.getElementById('ecran-connexion').style.display = 'flex';
-      document.getElementById('app-content').style.display = 'none';
-    }
-  });
+  // Reprise automatique de session si déjà connecté précédemment sur ce navigateur
+  const sessionPrec = sessionStorage.getItem('bdx_utilisateur');
+  if(sessionPrec && UTILISATEURS_AUTORISES[sessionPrec]){
+    connecterUtilisateur(sessionPrec);
+  }
 }
 
 function seConnecter(){
-  const email = document.getElementById('login-email').value.trim();
+  const nom = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-password').value;
   const alertEl = document.getElementById('login-alert');
   alertEl.style.display = 'none';
-  if(!email || !pass){
-    alertEl.textContent = 'Email et mot de passe requis.';
+  if(!nom || !pass){
+    alertEl.textContent = "Nom d'utilisateur et mot de passe requis.";
     alertEl.style.display = 'block';
     return;
   }
@@ -2227,21 +2224,33 @@ function seConnecter(){
     alertEl.style.display = 'block';
     return;
   }
-  document.getElementById('login-statut').textContent = 'Connexion en cours...';
-  firebaseAuth.signInWithEmailAndPassword(email, pass)
-    .catch(err => {
-      document.getElementById('login-statut').textContent = '';
-      alertEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
-        ? '✗ Email ou mot de passe incorrect.'
-        : '✗ Erreur de connexion : ' + err.message;
-      alertEl.style.display = 'block';
-    });
+  if(UTILISATEURS_AUTORISES[nom] !== pass){
+    alertEl.textContent = "✗ Nom d'utilisateur ou mot de passe incorrect.";
+    alertEl.style.display = 'block';
+    return;
+  }
+  sessionStorage.setItem('bdx_utilisateur', nom);
+  connecterUtilisateur(nom);
+}
+
+function connecterUtilisateur(nom){
+  utilisateurConnecte = nom;
+  document.getElementById('ecran-connexion').style.display = 'none';
+  document.getElementById('app-content').style.display = 'block';
+  document.getElementById('utilisateur-connecte-label').textContent = nom;
+  demarrerSyncFirebase();
+  init();
 }
 
 function seDeconnecter(){
   if(!confirm('Se déconnecter ?')) return;
   if(syncRef) syncRef.off();
-  firebaseAuth.signOut();
+  sessionStorage.removeItem('bdx_utilisateur');
+  utilisateurConnecte = null;
+  document.getElementById('ecran-connexion').style.display = 'flex';
+  document.getElementById('app-content').style.display = 'none';
+  document.getElementById('login-email').value = '';
+  document.getElementById('login-password').value = '';
 }
 
 // Synchronisation temps réel : Firebase est la source de vérité partagée.
@@ -2279,7 +2288,7 @@ function demarrerSyncFirebase(){
     }catch(e){}
     renderCieCheckboxes(); renderPolices(); renderBDX(); renderCC(); renderRecap(); majStockageInfo();
     ecritureEnCoursDepuisFirebase = false;
-    const qui = distant.derniereMaj ? ` (maj par ${distant.derniereMaj.par.split('@')[0]})` : '';
+    const qui = distant.derniereMaj ? ` (maj par ${distant.derniereMaj.par})` : '';
     if(badgeSync) badgeSync.textContent = '✓ Synchronisé' + qui;
   }, err => {
     console.error('Erreur de synchronisation Firebase :', err);
@@ -2321,7 +2330,7 @@ function init(){
   majStockageInfo();
   majBadgeDelaiCima();
 }
-// init() est désormais appelée après authentification réussie (voir initFirebase ci-dessus),
+// init() est désormais appelée après connexion réussie (voir connecterUtilisateur ci-dessus),
 // pas au chargement de la page — l'app reste cachée derrière l'écran de connexion jusque-là.
 initFirebase();
 </script>
