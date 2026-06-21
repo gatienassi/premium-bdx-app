@@ -1,0 +1,2330 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BDX Cycle Complet & Compte Courant — Multi-Cabinet v3.0 (Firebase)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script>
+// Vérifie si SheetJS a pu se charger (peut être bloqué par Chrome quand le fichier
+// est ouvert en file:// — notamment après un téléchargement, à cause du Mark of the Web).
+window.addEventListener('DOMContentLoaded', function(){
+  setTimeout(function(){
+    if (typeof XLSX === 'undefined') {
+      var banner = document.createElement('div');
+      banner.style.cssText = 'background:#c0392b;color:#fff;padding:14px 20px;font-family:Arial,sans-serif;font-size:14px;line-height:1.6;position:sticky;top:0;z-index:9999;';
+      banner.innerHTML =
+        '⚠️ <strong>La bibliothèque Excel n\'a pas pu se charger</strong> — l\'import/export de fichiers Excel ne fonctionnera pas tant que ce n\'est pas résolu.<br>' +
+        'Cause probable : Chrome bloque le chargement depuis Internet quand le fichier est ouvert directement en double-clic (surtout après téléchargement).<br>' +
+        '<strong>Solution :</strong> clic droit sur le fichier .html → Propriétés → coche "Débloquer" en bas → Appliquer → rouvre le fichier. ' +
+        'Ou bien : dans Chrome, ouvre un onglet, fais Ctrl+O et sélectionne le fichier au lieu de double-cliquer dessus depuis l\'Explorateur.';
+      document.body.insertBefore(banner, document.body.firstChild);
+    }
+  }, 1500);
+});
+</script>
+<style>
+:root {
+  --pca-primary:#1a3a5c; --pca-secondary:#2980b9; --pca-accent:#e67e22;
+  --pca-success:#27ae60; --pca-danger:#c0392b; --pca-warning:#f39c12;
+  --pca-light:#ecf0f1; --pca-dark:#2c3e50; --pca-white:#ffffff; --pca-bg:#f4f6f9;
+  --pca-border:#d0d7de; --pca-purple:#7d3c98;
+}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Segoe UI',Arial,sans-serif;background:var(--pca-bg);color:var(--pca-dark);font-size:13.5px;}
+
+/* HEADER */
+.app-header{background:linear-gradient(135deg,var(--pca-primary),var(--pca-secondary));color:#fff;display:flex;align-items:center;padding:11px 20px;gap:13px;box-shadow:0 3px 10px rgba(0,0,0,.22);position:sticky;top:0;z-index:200;}
+.header-logo{font-size:1.5em;font-weight:900;background:var(--pca-accent);color:#fff;padding:6px 11px;border-radius:8px;letter-spacing:2px;}
+.header-info h1{font-size:1.1em;font-weight:700;}
+.header-info p{font-size:.72em;opacity:.82;margin-top:1px;}
+.header-meta{margin-left:auto;text-align:right;font-size:.78em;opacity:.85;}
+.header-meta strong{display:block;font-size:1.02em;}
+
+/* PERIODE BAR */
+.periode-bar{background:var(--pca-primary);border-bottom:2px solid rgba(255,255,255,.1);padding:7px 20px;display:flex;align-items:center;gap:11px;flex-wrap:wrap;}
+.periode-bar label{color:rgba(255,255,255,.75);font-size:.78em;font-weight:600;}
+.periode-bar select,.periode-bar input{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;padding:4px 9px;border-radius:5px;font-size:.82em;}
+.periode-bar select option{background:#1a3a5c;color:#fff;}
+.periode-badge{background:var(--pca-accent);color:#fff;padding:3px 11px;border-radius:12px;font-size:.78em;font-weight:700;}
+#badge-delai-cima{display:inline-block;margin-top:3px;padding:2px 9px;border-radius:10px;font-size:.7em;font-weight:700;}
+#badge-delai-cima.delai-ok{background:rgba(39,174,96,.25);color:#d5f5e3;}
+#badge-delai-cima.delai-attention{background:rgba(243,156,18,.3);color:#fff3cd;}
+#badge-delai-cima.delai-urgent{background:rgba(192,57,43,.4);color:#fff;}
+#sel-cabinet{font-size:.88em;}
+body.cabinet-ELITE .app-header{background:linear-gradient(135deg,#5c1a3a,#a8295a);}
+body.cabinet-ELITE .periode-bar{background:#5c1a3a;}
+body.cabinet-ELITE .header-logo{background:#a8295a;}
+body.cabinet-ELITE .periode-badge{background:#a8295a;}
+body.cabinet-ELITE .tabs-bar{background:#3a1024;border-bottom-color:#a8295a;}
+body.cabinet-ELITE .tab-btn.active{border-bottom-color:#a8295a;}
+body.cabinet-ELITE .card-title{border-bottom-color:#a8295a;}
+body.cabinet-ELITE .btn-accent{background:#a8295a;}
+.btn-historique{margin-left:auto;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);padding:4px 11px;border-radius:5px;font-size:.78em;font-weight:600;cursor:pointer;}
+.btn-historique:hover{background:rgba(255,255,255,.25);}
+
+/* TABS */
+.tabs-bar{display:flex;background:var(--pca-dark);border-bottom:3px solid var(--pca-accent);overflow-x:auto;}
+.tab-btn{padding:9px 16px;color:rgba(255,255,255,.65);border:none;background:transparent;cursor:pointer;font-size:.83em;font-weight:600;white-space:nowrap;border-bottom:3px solid transparent;margin-bottom:-3px;transition:all .2s;}
+.tab-btn:hover{color:#fff;background:rgba(255,255,255,.07);}
+.tab-btn.active{color:#fff;border-bottom-color:var(--pca-accent);background:rgba(255,255,255,.1);}
+.tab-content{display:none;padding:16px 20px;}
+.tab-content.active{display:block;}
+
+/* SUB-TABS (cycle BDX) */
+.subtabs-bar{display:flex;gap:5px;margin-bottom:14px;flex-wrap:wrap;}
+.subtab-btn{padding:7px 14px;border-radius:7px;font-size:.82em;font-weight:700;cursor:pointer;border:1.5px solid var(--pca-border);background:#fff;color:var(--pca-dark);transition:all .2s;display:flex;align-items:center;gap:6px;}
+.subtab-btn:hover{border-color:var(--pca-secondary);}
+.subtab-btn.active{color:#fff;border-color:transparent;}
+.subtab-btn.active.emission{background:var(--pca-secondary);}
+.subtab-btn.active.encaissement{background:var(--pca-success);}
+.subtab-btn.active.reversement{background:var(--pca-purple);}
+.subtab-btn.active.annulation{background:var(--pca-danger);}
+.subtab-count{background:rgba(0,0,0,.12);padding:1px 7px;border-radius:10px;font-size:.85em;}
+.subtab-btn.active .subtab-count{background:rgba(255,255,255,.25);}
+
+/* CARDS */
+.card{background:#fff;border-radius:10px;box-shadow:0 1px 5px rgba(0,0,0,.08);padding:16px;margin-bottom:14px;}
+.card-title{font-size:.92em;font-weight:700;color:var(--pca-primary);border-bottom:2px solid var(--pca-accent);padding-bottom:6px;margin-bottom:11px;display:flex;align-items:center;gap:8px;}
+
+/* FORMS */
+.form-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:9px;}
+.form-group{display:flex;flex-direction:column;gap:3px;}
+.form-group label{font-size:.76em;font-weight:600;color:var(--pca-primary);}
+.form-group input,.form-group select{padding:6px 8px;border:1.5px solid var(--pca-border);border-radius:5px;font-size:.86em;}
+.form-group input:focus,.form-group select:focus{outline:none;border-color:var(--pca-secondary);}
+.form-group input[readonly]{background:#f0f4f8;color:#666;}
+
+/* BUTTONS */
+button{padding:6px 13px;border:none;border-radius:5px;cursor:pointer;font-size:.84em;font-weight:600;transition:opacity .2s,transform .1s;}
+button:hover{opacity:.87;}
+button:active{transform:scale(.97);}
+.btn-primary{background:var(--pca-primary);color:#fff;}
+.btn-secondary{background:var(--pca-secondary);color:#fff;}
+.btn-accent{background:var(--pca-accent);color:#fff;}
+.btn-success{background:var(--pca-success);color:#fff;}
+.btn-danger{background:var(--pca-danger);color:#fff;}
+.btn-purple{background:var(--pca-purple);color:#fff;}
+.btn-outline{background:transparent;color:var(--pca-primary);border:1.5px solid var(--pca-primary);}
+.btn-sm{padding:4px 9px;font-size:.76em;}
+.btn-group{display:flex;gap:6px;flex-wrap:wrap;}
+
+/* TABLES */
+.table-wrap{overflow-x:auto;border-radius:7px;border:1px solid var(--pca-border);}
+table{width:auto;border-collapse:collapse;font-size:.82em;}
+thead{background:var(--pca-primary);color:#fff;}
+th{padding:7px 8px;text-align:left;white-space:nowrap;font-weight:600;}
+td{padding:5px 8px;border-bottom:1px solid #e8ecf0;white-space:nowrap;}
+tr:nth-child(even) td{background:#f8fafc;}
+tr:hover td{background:#ddeeff;}
+td.num{text-align:right;font-family:monospace;}
+tfoot td{background:var(--pca-primary);color:#fff;font-weight:700;padding:7px 8px;}
+tfoot td.num{text-align:right;}
+
+/* STATUT BADGES */
+.statut{display:inline-block;padding:2px 9px;border-radius:12px;font-size:.72em;font-weight:700;}
+.statut-emise{background:#d6eaf8;color:#1a5a8a;}
+.statut-encaissee{background:#d5f5e3;color:#1a7a40;}
+.statut-reversee{background:#ead9f5;color:#5d2a7a;}
+.statut-annulee{background:#fadbd8;color:#922b21;}
+
+/* BADGES & ALERTS */
+.badge{display:inline-block;padding:2px 8px;border-radius:12px;font-size:.72em;font-weight:700;}
+.badge-primary{background:var(--pca-primary);color:#fff;}
+.badge-success{background:var(--pca-success);color:#fff;}
+.badge-warning{background:var(--pca-warning);color:#fff;}
+.badge-danger{background:var(--pca-danger);color:#fff;}
+.alert{padding:9px 13px;border-radius:6px;margin-bottom:10px;font-size:.84em;}
+.alert-info{background:#d6eaf8;border-left:4px solid var(--pca-secondary);}
+.alert-success{background:#d5f5e3;border-left:4px solid var(--pca-success);}
+.alert-warning{background:#fef9e7;border-left:4px solid var(--pca-warning);}
+.alert-danger{background:#fadbd8;border-left:4px solid var(--pca-danger);}
+
+/* STATS */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px;margin-bottom:14px;}
+.stat-card{background:#fff;border-radius:9px;padding:11px 14px;box-shadow:0 1px 4px rgba(0,0,0,.07);border-left:4px solid var(--pca-secondary);}
+.stat-card .sl{font-size:.71em;font-weight:600;color:#888;text-transform:uppercase;letter-spacing:.5px;}
+.stat-card .sv{font-size:1.2em;font-weight:800;color:var(--pca-primary);margin-top:2px;}
+.stat-card .ss{font-size:.7em;color:#999;margin-top:1px;}
+.stat-card.acc{border-left-color:var(--pca-accent);}
+.stat-card.suc{border-left-color:var(--pca-success);}
+.stat-card.war{border-left-color:var(--pca-warning);}
+.stat-card.dan{border-left-color:var(--pca-danger);}
+.stat-card.pur{border-left-color:var(--pca-purple);}
+
+/* CC DUAL VIEW */
+.cc-dual{display:grid;grid-template-columns:1fr 1fr;gap:14px;}
+@media (max-width:800px){.cc-dual{grid-template-columns:1fr;}}
+.cc-block{border:1px solid var(--pca-border);border-radius:8px;overflow:hidden;margin-bottom:12px;}
+.cc-block-title{padding:8px 13px;font-weight:700;font-size:.85em;color:#fff;}
+.cc-row{display:flex;justify-content:space-between;align-items:center;padding:7px 13px;border-bottom:1px solid #eee;font-size:.88em;}
+.cc-row:last-child{border-bottom:none;}
+.cc-row.total{background:var(--pca-light);font-weight:700;}
+.cc-row.solde{font-weight:800;font-size:.95em;padding:10px 13px;color:#fff;}
+.cc-amount{font-family:monospace;font-weight:700;}
+
+/* IMPORT ZONE */
+.import-zone{border:2px dashed var(--pca-border);border-radius:8px;padding:16px;text-align:center;cursor:pointer;transition:all .2s;}
+.import-zone:hover{border-color:var(--pca-secondary);background:#f0f8ff;}
+.import-zone input[type=file]{display:none;}
+
+/* COMPAGNIE TABS */
+.compagnie-selector{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;}
+.cie-tab{padding:5px 12px;border-radius:18px;font-size:.79em;font-weight:700;cursor:pointer;border:2px solid var(--pca-border);background:#fff;color:var(--pca-dark);transition:all .2s;}
+.cie-tab:hover{border-color:var(--pca-secondary);color:var(--pca-secondary);}
+.cie-tab.active{background:var(--pca-primary);color:#fff;border-color:var(--pca-primary);}
+
+/* PERIODE INFO */
+.trimestre-info{background:linear-gradient(135deg,#1a3a5c,#2980b9);color:#fff;border-radius:10px;padding:12px 16px;margin-bottom:14px;display:flex;gap:18px;align-items:center;flex-wrap:wrap;}
+.trimestre-info .ti-label{font-size:.72em;opacity:.8;}
+.trimestre-info .ti-value{font-size:.95em;font-weight:700;}
+
+/* MODAL */
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.52);z-index:1000;align-items:center;justify-content:center;}
+.modal-overlay.open{display:flex;}
+.modal{background:#fff;border-radius:12px;padding:20px;width:92%;max-width:720px;max-height:92vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.22);}
+.modal h2{color:var(--pca-primary);margin-bottom:13px;font-size:1.02em;border-bottom:2px solid var(--pca-accent);padding-bottom:6px;}
+.modal-footer{display:flex;gap:8px;justify-content:flex-end;margin-top:13px;padding-top:10px;border-top:1px solid #eee;}
+
+/* HISTORIQUE */
+.histo-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:9px;margin-top:11px;}
+.histo-card{background:#fff;border:1.5px solid var(--pca-border);border-radius:8px;padding:11px;cursor:pointer;transition:all .2s;}
+.histo-card:hover{border-color:var(--pca-secondary);box-shadow:0 2px 8px rgba(41,128,185,.15);}
+.histo-card.current{border-color:var(--pca-accent);background:#fff8f0;}
+.histo-card .hc-periode{font-size:1.05em;font-weight:800;color:var(--pca-primary);}
+.histo-card .hc-meta{font-size:.74em;color:#888;margin-top:2px;}
+.histo-card .hc-stats{font-size:.78em;color:var(--pca-dark);margin-top:5px;font-weight:600;}
+
+/* CYCLE PROGRESS */
+.cycle-track{display:flex;align-items:center;gap:0;margin:2px 0;}
+.cycle-step{width:9px;height:9px;border-radius:50%;background:#ddd;}
+.cycle-step.done{background:var(--pca-success);}
+.cycle-step.current{background:var(--pca-secondary);}
+.cycle-line{flex:1;height:2px;background:#ddd;min-width:8px;}
+.cycle-line.done{background:var(--pca-success);}
+
+/* SEARCH */
+.search-bar{display:flex;gap:7px;align-items:center;margin-bottom:11px;}
+.search-bar input{flex:1;padding:6px 10px;border:1.5px solid var(--pca-border);border-radius:6px;font-size:.86em;}
+.search-bar input:focus{outline:none;border-color:var(--pca-secondary);}
+
+/* MISC */
+.empty-state{text-align:center;padding:32px 16px;color:#999;}
+.empty-state .icon{font-size:2.1em;margin-bottom:7px;}
+.text-muted{color:#888;font-size:.81em;}
+.section-header{display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:11px;}
+.doublon-badge{display:inline-block;background:#fadbd8;color:var(--pca-danger);border:1px solid #f1948a;border-radius:4px;padding:1px 6px;font-size:.72em;font-weight:700;}
+
+@media print{
+  .tabs-bar,.periode-bar,.btn-group,.compagnie-selector,.import-zone,.no-print,.app-header,.subtabs-bar{display:none!important;}
+  .tab-content{display:block!important;}
+  .card{box-shadow:none;border:1px solid #ccc;}
+}
+
+/* === Impression du Rapport Trimestriel complet === */
+body.mode-impression-rapport > *:not(#zone-impression-rapport){ display:none!important; }
+body.mode-impression-rapport #zone-impression-rapport{ display:block!important; }
+.rapport-page{ padding:18px 4px 28px; }
+.rapport-page-break{ page-break-before:always; }
+.rapport-entete{ background:var(--pca-primary); color:#fff; padding:14px 18px; border-radius:6px; margin-bottom:14px; }
+.rapport-entete h1{ font-size:1.15em; margin-bottom:3px; }
+.rapport-entete p{ font-size:.8em; opacity:.85; }
+.rapport-section-titre{ font-size:1em; font-weight:800; color:var(--pca-primary); border-bottom:2px solid var(--pca-accent); padding-bottom:6px; margin:0 0 11px; }
+.rapport-table{ width:auto; border-collapse:collapse; font-size:.76em; margin-bottom:10px; }
+.rapport-table th{ background:var(--pca-primary); color:#fff; padding:5px 7px; text-align:left; white-space:nowrap; }
+.rapport-table th.num{ text-align:right; }
+.rapport-table td{ padding:4px 7px; border-bottom:1px solid #e8ecf0; white-space:nowrap; }
+.rapport-table td.num{ text-align:right; font-family:monospace; }
+.rapport-table tfoot td{ background:#dde6ee; font-weight:800; color:var(--pca-primary); border-top:2px solid var(--pca-primary); }
+.rapport-cc-block{ border:1px solid #ccc; border-radius:6px; overflow:hidden; margin-bottom:12px; max-width:480px; }
+.rapport-cc-row{ display:flex; justify-content:space-between; padding:6px 12px; border-bottom:1px solid #eee; font-size:.86em; }
+.rapport-cc-row.total{ background:#f4f6f9; font-weight:700; }
+.rapport-cc-row.solde{ background:var(--pca-primary); color:#fff; font-weight:800; padding:9px 12px; }
+.rapport-signature{ margin-top:30px; display:grid; grid-template-columns:1fr 1fr; gap:24px; }
+.rapport-signature-block{ border:1px solid #999; border-radius:6px; padding:14px; min-height:140px; }
+.rapport-signature-block h4{ font-size:.85em; color:var(--pca-primary); margin-bottom:8px; border-bottom:1px solid #ddd; padding-bottom:5px; }
+.rapport-signature-line{ margin-top:10px; font-size:.8em; color:#444; }
+.rapport-signature-line .ligne{ display:inline-block; border-bottom:1px solid #999; min-width:160px; margin-left:6px; }
+.rapport-reserves{ margin-top:18px; border:1px solid #999; border-radius:6px; padding:12px; }
+.rapport-reserves h4{ font-size:.85em; color:var(--pca-primary); margin-bottom:8px; }
+.rapport-reserves .zone-vide{ border-bottom:1px solid #ccc; height:22px; margin-top:14px; }
+.rapport-footer-note{ margin-top:14px; font-size:.7em; color:#888; font-style:italic; }
+@media print{
+  .rapport-page-break{ page-break-before:always; }
+  .rapport-table{ font-size:.72em; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================================================ ÉCRAN DE CONNEXION -->
+<div id="ecran-connexion" style="position:fixed;inset:0;background:linear-gradient(135deg,#1a3a5c,#2980b9);display:flex;align-items:center;justify-content:center;z-index:5000;">
+  <div style="background:#fff;border-radius:14px;padding:32px 30px;width:92%;max-width:380px;box-shadow:0 10px 40px rgba(0,0,0,.3);">
+    <div style="text-align:center;margin-bottom:22px;">
+      <div style="display:inline-flex;align-items:center;justify-content:center;width:56px;height:56px;background:var(--pca-accent);color:#fff;font-weight:900;font-size:1.3em;border-radius:12px;margin-bottom:10px;">PCA</div>
+      <h2 style="color:var(--pca-primary);font-size:1.1em;">BDX Cycle Complet &amp; Compte Courant</h2>
+      <p style="color:#888;font-size:.8em;margin-top:3px;">Connexion requise — accès partagé Premium Courtage Assur &amp; Elite Assurances</p>
+    </div>
+    <div class="form-group" style="margin-bottom:11px;">
+      <label>Email</label>
+      <input type="email" id="login-email" placeholder="prenom@premium.com" style="width:100%;padding:9px 11px;">
+    </div>
+    <div class="form-group" style="margin-bottom:14px;">
+      <label>Mot de passe</label>
+      <input type="password" id="login-password" placeholder="••••••••" style="width:100%;padding:9px 11px;" onkeydown="if(event.key==='Enter') seConnecter()">
+    </div>
+    <div id="login-alert" class="alert alert-danger" style="display:none;margin-bottom:11px;"></div>
+    <button class="btn-primary" style="width:100%;padding:10px;font-size:.95em;" onclick="seConnecter()">🔐 Se connecter</button>
+    <p id="login-statut" style="text-align:center;color:#999;font-size:.78em;margin-top:13px;"></p>
+  </div>
+</div>
+
+<div id="app-content" style="display:none;">
+
+<header class="app-header">
+  <div class="header-logo" id="header-logo">PCA</div>
+  <div class="header-info">
+    <h1>BDX Cycle Complet &amp; Compte Courant</h1>
+    <p id="header-cabinet-sub">Premium Courtage Assur — Accr. N°211 MEF/DGTCP/DA</p>
+  </div>
+  <div class="header-meta">
+    <strong id="display-periode">—</strong>
+    <span id="display-date"></span>
+    <span style="display:block;font-size:.68em;opacity:.65;margin-top:1px;">v3.0</span>
+    <span id="badge-delai-cima" class="no-print" style="display:none;"></span>
+    <span id="badge-sync" class="no-print" style="display:block;font-size:.68em;margin-top:2px;">🔄 Synchronisation...</span>
+    <button class="no-print" id="btn-deconnexion" onclick="seDeconnecter()" style="margin-top:4px;background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);padding:2px 9px;border-radius:5px;font-size:.7em;cursor:pointer;">↩ <span id="utilisateur-connecte-label"></span></button>
+  </div>
+</header>
+
+<div class="periode-bar">
+  <label>Cabinet :</label>
+  <select id="sel-cabinet" onchange="changerCabinet()" style="font-weight:700;">
+    <option value="PCA">Premium Courtage Assur</option>
+    <option value="ELITE">Elite Assurances</option>
+  </select>
+  <label>Trimestre :</label>
+  <select id="sel-trim" onchange="changerPeriode()">
+    <option value="T1">T1 — Janv. à Mars</option>
+    <option value="T2">T2 — Avr. à Juin</option>
+    <option value="T3" selected>T3 — Juil. à Sept.</option>
+    <option value="T4">T4 — Oct. à Déc.</option>
+  </select>
+  <label>Année :</label>
+  <input type="number" id="sel-annee" value="2025" min="2020" max="2035" style="width:75px;" onchange="changerPeriode()">
+  <span class="periode-badge" id="periode-badge">T3 · 2025</span>
+  <button class="btn-historique" onclick="ouvrirHistorique()">🕐 Historique</button>
+</div>
+
+
+<div class="tabs-bar">
+  <button class="tab-btn active" onclick="showTab('config',this)">⚙️ Configuration</button>
+  <button class="tab-btn" onclick="showTab('polices',this)">📋 Gestion des Polices</button>
+  <button class="tab-btn" onclick="showTab('bdx',this)">📑 Les 4 Bordereaux</button>
+  <button class="tab-btn" onclick="showTab('cc',this)">💰 Compte Courant</button>
+  <button class="tab-btn" onclick="showTab('recap',this)">📊 Récapitulatif</button>
+  <button class="tab-btn" onclick="showTab('sauvegarde',this)">💾 Sauvegarde</button>
+</div>
+
+<!-- ============================================================ TAB CONFIG -->
+<div class="tab-content active" id="tab-config">
+  <div class="card">
+    <div class="card-title">🔄 Comprendre le cycle de vie d'une police</div>
+    <div class="alert alert-info" style="line-height:1.6;">
+      <strong>1. ÉMISE</strong> → la police est souscrite et la prime est due.<br>
+      <strong>2. ENCAISSÉE</strong> → PCA a reçu l'argent du client (date + montant encaissé).<br>
+      <strong>3. REVERSÉE</strong> → PCA a reversé la part due à la compagnie (date + montant reversé).<br>
+      <strong>4. ANNULÉE</strong> → la police est annulée à tout moment ; elle sort du flux Encaissement/Reversement et apparaît uniquement dans le BDX Émission + BDX Annulation (conforme à la pratique CIMA — état C9).
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">🏢 Compagnies actives</div>
+    <div class="alert alert-info">Sélection partagée entre tous les trimestres.</div>
+    <div id="cie-checkboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:7px;margin-bottom:11px;"></div>
+    <div class="btn-group">
+      <button class="btn-primary" onclick="sauvegarderConfig()">💾 Enregistrer</button>
+      <span id="cfg-save-msg" style="margin-left:8px;color:var(--pca-success);font-weight:600;display:none;">✓ Sauvegardé</span>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">📐 Taux de commission &amp; bonus (fusionnés en une colonne COMMISSION)</div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Branche</th><th class="num">Comm. base</th><th class="num">2ACI</th><th class="num">GNA</th><th class="num">COMAR</th><th class="num">NSIA</th><th class="num">SANLAM</th><th class="num">Autres</th></tr></thead>
+        <tbody id="taux-table"></tbody>
+      </table>
+    </div>
+    <p class="text-muted" style="margin-top:6px;">⚠️ MALADIE : Bonus = 0%. PVT + NSIA : commission 27%. La colonne <strong>COMMISSION</strong> dans les BDX = Commission base + Bonus, déjà additionnés (comme dans vos fichiers GNA).</p>
+  </div>
+</div>
+
+<!-- ============================================================ TAB GESTION POLICES -->
+<div class="tab-content" id="tab-polices">
+  <div class="card" style="padding:11px 16px;">
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+      <strong style="color:var(--pca-primary);">Compagnie :</strong>
+      <div id="pol-cie-tabs" class="compagnie-selector" style="margin-bottom:0;"></div>
+    </div>
+  </div>
+
+  <div class="trimestre-info">
+    <div><div class="ti-label">Période</div><div class="ti-value" id="pol-periode">—</div></div>
+    <div><div class="ti-label">Compagnie</div><div class="ti-value" id="pol-cie-active">—</div></div>
+    <div><div class="ti-label">Total polices</div><div class="ti-value" id="pol-nb">0</div></div>
+    <div><div class="ti-label">Émises</div><div class="ti-value" id="pol-nb-emise">0</div></div>
+    <div><div class="ti-label">Encaissées</div><div class="ti-value" id="pol-nb-enc">0</div></div>
+    <div><div class="ti-label">Reversées</div><div class="ti-value" id="pol-nb-rev">0</div></div>
+    <div><div class="ti-label">Annulées</div><div class="ti-value" id="pol-nb-ann">0</div></div>
+    <div style="margin-left:auto;" class="no-print">
+      <button class="btn-accent btn-sm" onclick="ouvrirModalSaisie()">➕ Nouvelle police</button>
+    </div>
+  </div>
+
+  <div class="card no-print">
+    <div class="card-title">📂 Import en masse (BDX Émission de référence)</div>
+    <div class="import-zone" onclick="document.getElementById('import-file').click()">
+      <input type="file" id="import-file" accept=".xlsx,.xls" onchange="importerExcel(event)">
+      <div style="font-size:1.8em;">📥</div>
+      <p style="font-weight:600;margin-top:4px;">Importer le fichier des polices émises</p>
+      <p class="text-muted">Colonnes reconnues : NUMERO DE POLICE · RISQUE (branche) · CLIENT · DATE SOUSCRIPTION · DATE EFFET · DATE ECHEANCE · PRIME NET · COUT DE POLICE/ACCESSOIRES · TAXE · PRIME TTC · COMMISSION</p>
+    </div>
+    <div id="import-msg" class="alert" style="display:none;margin-top:8px;"></div>
+  </div>
+
+  <div class="section-header no-print">
+    <div class="search-bar" style="flex:1;max-width:340px;margin-bottom:0;">
+      <input type="text" id="pol-search" placeholder="🔍 Police, assuré, branche..." oninput="renderPolices()">
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <select id="pol-filter-statut" onchange="renderPolices()" style="padding:6px 9px;border:1.5px solid var(--pca-border);border-radius:6px;font-size:.85em;">
+        <option value="">Tous statuts</option>
+        <option value="EMISE">Émise</option>
+        <option value="ENCAISSEE">Encaissée</option>
+        <option value="REVERSEE">Reversée</option>
+        <option value="ANNULEE">Annulée</option>
+      </select>
+      <button class="btn-outline btn-sm" onclick="viderPolices()">🗑️ Vider</button>
+      <button class="btn-success btn-sm" onclick="exporterPolicesExcel()">⬇️ Excel</button>
+    </div>
+  </div>
+
+  <div id="doublon-alert" class="alert alert-danger" style="display:none;"></div>
+  <div id="branche-alert" class="alert alert-warning" style="display:none;"></div>
+
+  <div id="bulk-action-bar" class="alert alert-info no-print" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;">
+    <strong id="bulk-count-label">0 police(s) sélectionnée(s)</strong>
+    <div class="btn-group" style="margin-left:auto;">
+      <button class="btn-success btn-sm" id="btn-bulk-encaisser" onclick="ouvrirModalGroupe('ENCAISSEMENT')">💵 Encaisser la sélection</button>
+      <button class="btn-purple btn-sm" id="btn-bulk-reverser" onclick="ouvrirModalGroupe('REVERSEMENT')">🏦 Reverser la sélection</button>
+      <button class="btn-outline btn-sm" onclick="deselectionnerTout()">✕ Désélectionner</button>
+    </div>
+  </div>
+
+  <div class="table-wrap">
+    <table id="pol-table">
+      <thead>
+        <tr>
+          <th class="no-print"><input type="checkbox" id="chk-select-all" onchange="toggleSelectAll(this)"></th>
+          <th>#</th><th>N° Police</th><th>Assuré</th><th>Branche</th>
+          <th>Date Effet</th><th class="num">Prime TTC</th><th class="num">Commission</th>
+          <th>Statut</th><th>Cycle</th>
+          <th class="no-print">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="pol-body"></tbody>
+      <tfoot id="pol-foot"></tfoot>
+    </table>
+  </div>
+</div>
+
+<!-- ============================================================ TAB 4 BDX -->
+<div class="tab-content" id="tab-bdx">
+  <div class="card" style="padding:11px 16px;">
+    <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;">
+      <strong style="color:var(--pca-primary);">Compagnie :</strong>
+      <div id="bdx-cie-tabs" class="compagnie-selector" style="margin-bottom:0;"></div>
+    </div>
+  </div>
+
+  <div class="subtabs-bar">
+    <button class="subtab-btn emission active" onclick="setBdxType('EMISSION',this)">📝 Émission <span class="subtab-count" id="cnt-emission">0</span></button>
+    <button class="subtab-btn encaissement" onclick="setBdxType('ENCAISSEMENT',this)">💵 Encaissement <span class="subtab-count" id="cnt-encaissement">0</span></button>
+    <button class="subtab-btn reversement" onclick="setBdxType('REVERSEMENT',this)">🏦 Reversement <span class="subtab-count" id="cnt-reversement">0</span></button>
+    <button class="subtab-btn annulation" onclick="setBdxType('ANNULATION',this)">❌ Annulation <span class="subtab-count" id="cnt-annulation">0</span></button>
+  </div>
+
+  <div class="trimestre-info">
+    <div><div class="ti-label">Bordereau</div><div class="ti-value" id="bdx-titre">D'ÉMISSION</div></div>
+    <div><div class="ti-label">Compagnie</div><div class="ti-value" id="bdx-cie-active">—</div></div>
+    <div><div class="ti-label">Période</div><div class="ti-value" id="bdx-periode">—</div></div>
+    <div><div class="ti-label">Lignes</div><div class="ti-value" id="bdx-nb">0</div></div>
+    <div><div class="ti-label">Prime TTC</div><div class="ti-value" id="bdx-ttc">0 F</div></div>
+    <div style="margin-left:auto;" class="no-print">
+      <button class="btn-success btn-sm" onclick="exporterBdxTypeExcel()">⬇️ Exporter ce BDX</button>
+      <button class="btn-secondary btn-sm" onclick="window.print()">🖨️ Imprimer</button>
+    </div>
+  </div>
+
+  <div id="bdx-content"></div>
+</div>
+
+<!-- ============================================================ TAB CC -->
+<div class="tab-content" id="tab-cc">
+  <div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-bottom:13px;">
+    <strong style="color:var(--pca-primary);">Compagnie :</strong>
+    <div id="cc-cie-tabs" class="compagnie-selector" style="margin-bottom:0;"></div>
+    <button class="btn-accent btn-sm no-print" style="margin-left:auto;" onclick="ouvrirModalRapport()">📦 Générer le Rapport Trimestriel</button>
+  </div>
+  <div id="cc-content">
+    <div class="empty-state"><div class="icon">💰</div><p>Sélectionne une compagnie</p></div>
+  </div>
+</div>
+
+<!-- ============================================================ TAB RECAP -->
+<div class="tab-content" id="tab-recap">
+  <div id="recap-content">
+    <div class="empty-state"><div class="icon">📊</div><p>Aucune donnée pour ce trimestre</p></div>
+  </div>
+</div>
+
+<!-- ============================================================ TAB SAUVEGARDE -->
+<div class="tab-content" id="tab-sauvegarde">
+  <div class="card">
+    <div class="card-title">📤 Exporter les données</div>
+    <p style="margin-bottom:11px;color:#555;font-size:.88em;">
+      <strong>Sauvegarde JSON</strong> : couvre toujours les <strong>deux cabinets</strong> (Premium Courtage Assur ET Elite Assurances), tous trimestres, toutes compagnies — pour ne jamais risquer de perdre les données de l'un en restaurant l'autre.<br>
+      <strong>Export Excel</strong> : couvre uniquement le cabinet actuellement affiché (<strong id="sauvegarde-cabinet-actif"></strong>).
+    </p>
+    <div class="btn-group">
+      <button class="btn-success" onclick="exporterJSON()">⬇️ Télécharger la sauvegarde JSON (2 cabinets)</button>
+      <button class="btn-secondary" onclick="exporterToutExcel()">📊 Exporter ce cabinet en Excel</button>
+    </div>
+  </div>
+  <div class="card">
+    <div class="card-title">📥 Restaurer une sauvegarde</div>
+    <p style="margin-bottom:11px;color:#555;font-size:.88em;">⚠️ Une sauvegarde JSON multi-cabinet remplace les données des deux cabinets. Une sauvegarde de l'ancien format (mono-cabinet) ne remplace que le cabinet actif.</p>
+    <div class="import-zone" onclick="document.getElementById('restore-file').click()">
+      <input type="file" id="restore-file" accept=".json" onchange="restaurerJSON(event)">
+      <div style="font-size:1.8em;">📁</div>
+      <p style="font-weight:600;margin-top:4px;">Importer un fichier de sauvegarde (.json)</p>
+    </div>
+    <div id="restore-msg" class="alert" style="display:none;margin-top:8px;"></div>
+  </div>
+  <div class="card">
+    <div class="card-title">📋 Données stockées</div>
+    <div id="stockage-info"></div>
+  </div>
+</div>
+
+<!-- ============================================================ MODAL SAISIE / GESTION STATUT -->
+<div class="modal-overlay" id="modal-saisie">
+  <div class="modal">
+    <h2>📝 Police — saisie &amp; cycle de vie</h2>
+
+    <div class="card-title" style="font-size:.84em;margin-bottom:8px;">1️⃣ Informations police (BDX Émission)</div>
+    <div class="form-grid">
+      <div class="form-group"><label>N° Police *</label><input type="text" id="s-police" oninput="this.value=this.value.toUpperCase();verifierDoublonModal()"></div>
+      <div class="form-group"><label>Nom Assuré (Client) *</label><input type="text" id="s-assure"></div>
+      <div class="form-group"><label>Branche (Risque) *</label>
+        <select id="s-branche" onchange="calcModal()">
+          <option value="">-- Choisir --</option>
+          <option>AUTO</option><option>MRP</option><option>RC</option><option>MRH</option>
+          <option>IA</option><option>TRC</option><option>CAUTION</option><option>MTT</option>
+          <option>MALADIE</option><option>BATEAU</option><option>PVT</option><option>TRM</option><option>MARITIME</option>
+        </select>
+      </div>
+      <div class="form-group"><label>Date Souscription</label><input type="date" id="s-souscription"></div>
+      <div class="form-group"><label>Date Effet *</label><input type="date" id="s-effet"></div>
+      <div class="form-group"><label>Date Échéance *</label><input type="date" id="s-echeance"></div>
+      <div class="form-group"><label>Prime Nette (FCFA) *</label><input type="number" id="s-pn" oninput="calcModal()"></div>
+      <div class="form-group"><label>Accessoires / Coût police (FCFA)</label><input type="number" id="s-acc" value="0" oninput="calcModal()"></div>
+      <div class="form-group"><label>Taxes (FCFA)</label><input type="number" id="s-taxes" value="0" oninput="calcModal()"></div>
+      <div class="form-group"><label>Prime TTC (FCFA)</label><input type="number" id="s-ttc" readonly style="background:#d5f5e3;font-weight:700;"></div>
+      <div class="form-group"><label>Commission (base+bonus fusionnés)</label><input type="number" id="s-comm" readonly style="background:#e8f4fc;font-weight:700;"></div>
+    </div>
+
+    <div class="card-title" style="font-size:.84em;margin:14px 0 8px;">2️⃣ Statut du cycle</div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>Statut actuel</label>
+        <select id="s-statut" onchange="toggleStatutFields()">
+          <option value="EMISE">Émise</option>
+          <option value="ENCAISSEE">Encaissée</option>
+          <option value="REVERSEE">Reversée</option>
+          <option value="ANNULEE">Annulée</option>
+        </select>
+      </div>
+      <div class="form-group" id="grp-date-enc"><label>Date Encaissement</label><input type="date" id="s-date-enc"></div>
+      <div class="form-group" id="grp-montant-enc"><label>Montant Encaissé (FCFA)</label><input type="number" id="s-montant-enc"></div>
+      <div class="form-group" id="grp-date-rev"><label>Date Reversement</label><input type="date" id="s-date-rev"></div>
+      <div class="form-group" id="grp-montant-rev"><label>Montant Reversé (FCFA)</label><input type="number" id="s-montant-rev"></div>
+      <div class="form-group" id="grp-date-ann"><label>Date Annulation</label><input type="date" id="s-date-ann"></div>
+    </div>
+
+    <div id="modal-doublon-alert" class="alert alert-warning" style="display:none;margin-top:10px;"></div>
+    <input type="hidden" id="s-edit-id">
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="fermerModal('modal-saisie')">Annuler</button>
+      <button class="btn-success" onclick="validerSaisie()">✓ Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ MODAL ACTION GROUPÉE -->
+<div class="modal-overlay" id="modal-groupe">
+  <div class="modal" style="max-width:600px;">
+    <h2 id="modal-groupe-titre">💵 Encaisser la sélection</h2>
+    <p style="color:#666;font-size:.86em;margin-bottom:11px;" id="modal-groupe-desc"></p>
+
+    <div id="modal-groupe-liste" style="max-height:180px;overflow-y:auto;border:1px solid var(--pca-border);border-radius:6px;padding:8px 11px;margin-bottom:13px;font-size:.82em;background:#f8fafc;"></div>
+
+    <div class="form-grid">
+      <div class="form-group">
+        <label id="lbl-groupe-date">Date Encaissement (appliquée à toute la sélection) *</label>
+        <input type="date" id="g-date">
+      </div>
+      <div class="form-group">
+        <label id="lbl-groupe-montant">Mode de montant</label>
+        <select id="g-mode-montant" onchange="toggleModeMontantGroupe()">
+          <option value="ttc">= Prime TTC de chaque police (recommandé)</option>
+          <option value="manuel">Saisir un montant unique pour toutes</option>
+        </select>
+      </div>
+      <div class="form-group" id="grp-g-montant-manuel" style="display:none;">
+        <label>Montant unique (FCFA)</label>
+        <input type="number" id="g-montant-manuel">
+      </div>
+    </div>
+
+    <div id="modal-groupe-alert" class="alert alert-warning" style="display:none;margin-top:10px;"></div>
+
+    <div class="modal-footer">
+      <button class="btn-outline" onclick="fermerModal('modal-groupe')">Annuler</button>
+      <button class="btn-success" id="btn-groupe-valider" onclick="validerActionGroupe()">✓ Appliquer à la sélection</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ MODAL RAPPORT TRIMESTRIEL -->
+<div class="modal-overlay" id="modal-rapport">
+  <div class="modal" style="max-width:620px;">
+    <h2>📦 Rapport Trimestriel — Dépôt Compagnie</h2>
+    <p style="color:#666;font-size:.86em;margin-bottom:13px;">
+      Le rapport regroupe, pour la compagnie et la période sélectionnées : le BDX d'Émission, le BDX d'Encaissement,
+      le BDX de Reversement, le BDX d'Annulation, et le Compte Courant avec son bloc de signature contradictoire
+      (conforme à l'Article 559 du Code CIMA).
+    </p>
+
+    <div class="alert alert-info" id="rapport-resume" style="margin-bottom:13px;"></div>
+
+    <div class="form-grid" style="margin-bottom:13px;">
+      <div class="form-group">
+        <label>Compagnie</label>
+        <input type="text" id="rapport-cie" readonly style="background:#f0f4f8;font-weight:700;">
+      </div>
+      <div class="form-group">
+        <label>Période</label>
+        <input type="text" id="rapport-periode" readonly style="background:#f0f4f8;font-weight:700;">
+      </div>
+    </div>
+
+    <div id="rapport-alert" class="alert alert-warning" style="display:none;"></div>
+
+    <div class="modal-footer" style="flex-wrap:wrap;">
+      <button class="btn-outline" onclick="fermerModal('modal-rapport')">Annuler</button>
+      <button class="btn-success" onclick="genererRapportExcel()">📊 Télécharger en Excel</button>
+      <button class="btn-secondary" onclick="genererRapportPDF()">🖨️ Aperçu PDF imprimable</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ ZONE IMPRESSION RAPPORT (cachée à l'écran) -->
+<div id="zone-impression-rapport" style="display:none;"></div>
+
+<!-- ============================================================ MODAL HISTORIQUE -->
+<div class="modal-overlay" id="modal-historique">
+  <div class="modal" style="max-width:800px;">
+    <h2>🕐 Historique des trimestres — <span id="historique-cabinet-label"></span></h2>
+    <p style="color:#666;font-size:.86em;margin-bottom:11px;">Clique sur un trimestre pour y accéder.</p>
+    <div id="historique-content"></div>
+    <div class="modal-footer"><button class="btn-outline" onclick="fermerModal('modal-historique')">Fermer</button></div>
+  </div>
+</div>
+
+<script>
+// ===================================================================
+// CONSTANTES MÉTIER
+// ===================================================================
+const COMPAGNIES_DISPO = ['2ACI','GNA','COMAR','NSIA','SANLAM','ALLIANZ','AXA','AMSA','ATLANTA','CORIS','SCHIBA','SUNU','SANLAM-ALLIANZ'];
+
+const TX_COMM = { AUTO:20, MRP:27, RC:23, MRH:27, IA:24, TRC:18, CAUTION:10, MTT:21, MALADIE:10, BATEAU:20, PVT:25, TRM:25, MARITIME:20 };
+const TX_BONUS = { '2ACI':7, GNA:5, COMAR:7.5, NSIA:5, SANLAM:3, ALLIANZ:0, AXA:0, AMSA:0, ATLANTA:0, CORIS:0, SCHIBA:0, SUNU:0, 'SANLAM-ALLIANZ':0 };
+
+// Variantes orthographiques rencontrées dans les fichiers réels des compagnies
+// (ex: GNA libelle parfois "MR IMMEUBLE" là où l'app attend "MRH").
+// Toute variante non listée ici sera signalée comme branche NON RECONNUE plutôt
+// que silencieusement rattachée à un taux par défaut.
+const ALIAS_BRANCHE = {
+  'MR IMMEUBLE':'MRH', 'MULTIRISQUE HABITATION':'MRH', 'MULTI RISQUE HABITATION':'MRH',
+  'MULTIRISQUE PROFESSIONNELLE':'MRP', 'MULTI RISQUE PROFESSIONNELLE':'MRP',
+  'RESPONSABILITE CIVILE':'RC', 'TOUS RISQUES CHANTIER':'TRC',
+  'TRANSPORT MARCHANDISES':'TRM', 'MARCHANDISES TRANSPORTEES':'MTT',
+  'INDIVIDUELLE ACCIDENT':'IA', 'ACCIDENTS':'IA',
+  'BATEAUX':'BATEAU', 'VOYAGE':'PVT', 'PROTECTION VOYAGE':'PVT'
+};
+
+// Normalise une branche en tentant d'abord une correspondance exacte, puis les alias connus.
+function normaliserBranche(brancheBrute){
+  const b = (brancheBrute||'').toString().trim().toUpperCase();
+  if(TX_COMM[b]!==undefined) return {branche:b, reconnue:true};
+  if(ALIAS_BRANCHE[b]) return {branche:ALIAS_BRANCHE[b], reconnue:true, alias:b};
+  return {branche:b, reconnue:false};
+}
+
+function getTxC(branche, cie) { if (branche==='PVT' && cie==='NSIA') return 27; return TX_COMM[branche]; }
+function getTxB(branche, cie) { if (branche==='MALADIE') return 0; return TX_BONUS[cie] || 0; }
+// Taux de secours utilisé UNIQUEMENT pour ne pas bloquer le calcul d'affichage,
+// jamais pour masquer un problème : toute branche non reconnue doit être signalée
+// à l'utilisateur via normaliserBranche() avant d'arriver ici.
+function getTxCSecours(branche, cie){ const t = getTxC(branche, cie); return t!==undefined ? t : 15; }
+
+const STATUT_LABELS = { EMISE:'Émise', ENCAISSEE:'Encaissée', REVERSEE:'Reversée', ANNULEE:'Annulée' };
+const STATUT_ORDER = ['EMISE','ENCAISSEE','REVERSEE'];
+
+// ===================================================================
+// STOCKAGE
+// ===================================================================
+const KEY_CONFIG = 'pca_v2_config';     // {cabinet: {compagnies:[...]}}
+const KEY_DATA   = 'pca_v2_data';       // {cabinet: {periodeKey: {cie: [polices]}}}
+function periodeKey(t,a){ return `${t}-${a}`; }
+
+const CABINETS = [
+  { id:'PCA',   nom:'Premium Courtage Assur', accr:"Accr. N°211 MEF/DGTCP/DA" },
+  { id:'ELITE', nom:'Elite Assurances',       accr:"Courtier d'assurance" }
+];
+function getCabinetInfo(id){ return CABINETS.find(c=>c.id===id) || CABINETS[0]; }
+
+let CABINET = 'PCA';
+let CFG_ALL = {};   // {cabinet: {compagnies:[...]}}
+let DATA_ALL = {};  // {cabinet: {periodeKey: {cie: [polices]}}}
+let CFG = { compagnies:['2ACI','GNA','COMAR'] };  // vue active = CFG_ALL[CABINET]
+let DATA = {};                                     // vue active = DATA_ALL[CABINET]
+let TRIM='T3', ANNEE=2025;
+let CIE_POL='', CIE_BDX='', CIE_CC='';
+let SELECTION_POL = new Set(); // ids des polices cochées (onglet Gestion des Polices)
+let BDX_TYPE='EMISSION';
+
+function charger(){
+  try{ CFG_ALL = JSON.parse(localStorage.getItem(KEY_CONFIG)) || {}; }catch(e){ CFG_ALL = {}; }
+  try{ DATA_ALL = JSON.parse(localStorage.getItem(KEY_DATA)) || {}; }catch(e){ DATA_ALL = {}; }
+  // Migration depuis l'ancien format mono-cabinet (avant l'introduction du multi-cabinet) :
+  // si une config/donnée existait directement à plat, on la rapatrie sous PCA par défaut.
+  const ancienCfg = (()=>{ try{ return JSON.parse(localStorage.getItem(KEY_CONFIG)); }catch(e){ return null; } })();
+  if(ancienCfg && ancienCfg.compagnies && !CFG_ALL.PCA && !CFG_ALL.ELITE){
+    CFG_ALL = { PCA: ancienCfg };
+  }
+  const ancienData = (()=>{ try{ return JSON.parse(localStorage.getItem(KEY_DATA)); }catch(e){ return null; } })();
+  if(ancienData && !DATA_ALL.PCA && !DATA_ALL.ELITE){
+    // Heuristique : si les clés ressemblent à des periodeKey ("T1-2025") plutôt qu'à des cabinets, c'est l'ancien format.
+    const cles = Object.keys(ancienData);
+    const ressembleAncien = cles.length>0 && cles.every(k=>/^T[1-4]-\d{4}$/.test(k));
+    if(ressembleAncien) DATA_ALL = { PCA: ancienData };
+  }
+  if(!CFG_ALL.PCA) CFG_ALL.PCA = { compagnies:['2ACI','GNA','COMAR'] };
+  if(!CFG_ALL.ELITE) CFG_ALL.ELITE = { compagnies:['2ACI','GNA','COMAR'] };
+  if(!DATA_ALL.PCA) DATA_ALL.PCA = {};
+  if(!DATA_ALL.ELITE) DATA_ALL.ELITE = {};
+  appliquerVueCabinet();
+}
+function appliquerVueCabinet(){
+  CFG = CFG_ALL[CABINET];
+  DATA = DATA_ALL[CABINET];
+}
+function sauvegarder(){
+  try{
+    localStorage.setItem(KEY_CONFIG, JSON.stringify(CFG_ALL));
+    localStorage.setItem(KEY_DATA, JSON.stringify(DATA_ALL));
+    pousserVersFirebase(); // propage immédiatement aux autres utilisateurs connectés
+    return true;
+  }catch(e){
+    // Stockage saturé ou indisponible (navigation privée, quota dépassé...) —
+    // on prévient explicitement plutôt que de perdre la saisie en silence.
+    afficherAlerteStockage(e);
+    return false;
+  }
+}
+function afficherAlerteStockage(e){
+  const jsonSize = (JSON.stringify(DATA).length/1024/1024).toFixed(2);
+  const msg = `⚠️ ÉCHEC DE SAUVEGARDE — Les dernières modifications n'ont PAS été enregistrées.\n\n`+
+    `Cause probable : espace de stockage du navigateur saturé (données actuelles : ${jsonSize} Mo) ou navigation privée.\n\n`+
+    `Action recommandée immédiate :\n`+
+    `1. Aller dans l'onglet "Sauvegarde" et télécharger une sauvegarde JSON de ce qui est encore en mémoire\n`+
+    `2. Libérer de l'espace (vider d'anciens trimestres exportés et non utilisés) ou changer de navigateur\n`+
+    `3. Réimporter la sauvegarde JSON\n\n`+
+    `Détail technique : ${e && e.message ? e.message : e}`;
+  alert(msg);
+}
+function getPeriodeData(){ const k=periodeKey(TRIM,ANNEE); if(!DATA[k]) DATA[k]={}; return DATA[k]; }
+function getCiePolices(cie){ const pd=getPeriodeData(); if(!pd[cie]) pd[cie]=[]; return pd[cie]; }
+
+// ===================================================================
+// UTILS
+// ===================================================================
+function fmt(n){ return new Intl.NumberFormat('fr-FR').format(Math.round(n||0))+' F'; }
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).substr(2,5); }
+function fmtDate(s){ if(!s) return ''; const d=new Date(s); return isNaN(d)?s:d.toLocaleDateString('fr-FR'); }
+function strDate(v){
+  if(!v) return '';
+  if(typeof v==='number'){ const d=new Date((v-25569)*86400*1000); return d.toISOString().split('T')[0]; }
+  if(v instanceof Date) return v.toISOString().split('T')[0];
+  // tenter de parser dd/mm/yyyy
+  const s=v.toString().trim();
+  const m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if(m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  return s;
+}
+
+// ===================================================================
+// PÉRIODE
+// ===================================================================
+function changerCabinet(){
+  CABINET = document.getElementById('sel-cabinet').value;
+  appliquerVueCabinet();
+  document.body.classList.remove('cabinet-PCA','cabinet-ELITE');
+  document.body.classList.add('cabinet-'+CABINET);
+  const info = getCabinetInfo(CABINET);
+  document.getElementById('header-logo').textContent = CABINET==='PCA' ? 'PCA' : 'ELITE';
+  document.getElementById('header-cabinet-sub').textContent = info.nom + ' — ' + info.accr;
+  // Réinitialiser les compagnies actives affichées sur la nouvelle vue cabinet
+  CIE_POL=''; CIE_BDX=''; CIE_CC='';
+  SELECTION_POL.clear();
+  renderCieCheckboxes();
+  afficherCieTabs();
+  changerPeriode();
+}
+
+function changerPeriode(){
+  TRIM=document.getElementById('sel-trim').value;
+  ANNEE=parseInt(document.getElementById('sel-annee').value)||2025;
+  const label=TRIM+' · '+ANNEE;
+  document.getElementById('periode-badge').textContent=label;
+  document.getElementById('display-periode').textContent=label;
+  if(!CIE_POL||!CFG.compagnies.includes(CIE_POL)) CIE_POL=CFG.compagnies[0]||'';
+  if(!CIE_BDX||!CFG.compagnies.includes(CIE_BDX)) CIE_BDX=CFG.compagnies[0]||'';
+  if(!CIE_CC ||!CFG.compagnies.includes(CIE_CC))  CIE_CC =CFG.compagnies[0]||'';
+  SELECTION_POL.clear();
+  afficherCieTabs();
+  renderPolices(); renderBDX(); renderCC(); renderRecap(); majStockageInfo();
+  majBadgeDelaiCima();
+}
+
+// Calcule la date limite légale de dépôt du compte courant (Art. 559 Code CIMA) pour le
+// trimestre affiché : 30 avril (T1), 31 juillet (T2), 31 octobre (T3), 31 janvier de l'année
+// suivante (T4) — et affiche un badge discret dans l'en-tête, sans bloquer ni alerter de force.
+function dateLimiteDepotCima(trim, annee){
+  const limites = { T1:[3,30], T2:[6,31], T3:[9,31], T4:[0,31] }; // mois 0-indexé pour Date()
+  const [mois, jour] = limites[trim];
+  const anneeLimite = trim==='T4' ? annee+1 : annee;
+  return new Date(anneeLimite, mois, jour);
+}
+function majBadgeDelaiCima(){
+  const badge = document.getElementById('badge-delai-cima');
+  if(!badge) return;
+  const limite = dateLimiteDepotCima(TRIM, ANNEE);
+  const aujourdHui = new Date();
+  aujourdHui.setHours(0,0,0,0);
+  const diffJours = Math.round((limite - aujourdHui) / 86400000);
+  const dateLimiteStr = limite.toLocaleDateString('fr-FR');
+
+  badge.classList.remove('delai-ok','delai-attention','delai-urgent');
+  if(diffJours < 0){
+    badge.textContent = `⚠️ Délai CIMA dépassé depuis ${Math.abs(diffJours)} j (échéance ${dateLimiteStr})`;
+    badge.classList.add('delai-urgent');
+  } else if(diffJours <= 7){
+    badge.textContent = `⏰ Délai CIMA : ${diffJours} j restant(s) (${dateLimiteStr})`;
+    badge.classList.add('delai-urgent');
+  } else if(diffJours <= 15){
+    badge.textContent = `📅 Délai CIMA : ${diffJours} j restants (${dateLimiteStr})`;
+    badge.classList.add('delai-attention');
+  } else {
+    badge.textContent = `Dépôt avant le ${dateLimiteStr} (${diffJours} j)`;
+    badge.classList.add('delai-ok');
+  }
+  badge.style.display = 'inline-block';
+}
+
+// ===================================================================
+// CONFIG
+// ===================================================================
+function renderCieCheckboxes(){
+  document.getElementById('cie-checkboxes').innerHTML = COMPAGNIES_DISPO.map(c=>`
+    <label style="display:flex;align-items:center;gap:6px;padding:5px 8px;border:1.5px solid var(--pca-border);border-radius:6px;cursor:pointer;background:#fff;">
+      <input type="checkbox" class="cie-check" value="${c}" ${CFG.compagnies.includes(c)?'checked':''}>
+      <span style="font-weight:600;">${c}</span>
+    </label>`).join('');
+}
+function sauvegarderConfig(){
+  CFG.compagnies=[];
+  document.querySelectorAll('.cie-check:checked').forEach(cb=>CFG.compagnies.push(cb.value));
+  sauvegarder(); afficherCieTabs();
+  const m=document.getElementById('cfg-save-msg'); m.style.display='inline'; setTimeout(()=>m.style.display='none',2000);
+}
+function renderTauxTable(){
+  document.getElementById('taux-table').innerHTML = Object.keys(TX_COMM).map(br=>`
+    <tr><td><strong>${br}</strong></td><td class="num">${TX_COMM[br]}%</td>
+    <td class="num">${br==='MALADIE'?'0%':'7%'}</td><td class="num">${br==='MALADIE'?'0%':'5%'}</td>
+    <td class="num">${br==='MALADIE'?'0%':'7.5%'}</td><td class="num">${br==='MALADIE'?'0%':'5%'}</td>
+    <td class="num">${br==='MALADIE'?'0%':'3%'}</td><td class="num">0%</td></tr>`).join('');
+}
+
+// ===================================================================
+// ONGLETS COMPAGNIE (3 contextes : polices, bdx, cc)
+// ===================================================================
+function afficherCieTabs(){
+  [['pol',CIE_POL],['bdx',CIE_BDX],['cc',CIE_CC]].forEach(([ctx,active])=>{
+    const el=document.getElementById(ctx+'-cie-tabs');
+    el.innerHTML = CFG.compagnies.map(c=>`<button class="cie-tab ${active===c?'active':''}" onclick="setCie('${ctx}','${c}')">${c}</button>`).join('');
+  });
+  if(!CIE_POL && CFG.compagnies.length){ CIE_POL=CFG.compagnies[0]; afficherCieTabs(); }
+  if(!CIE_BDX && CFG.compagnies.length){ CIE_BDX=CFG.compagnies[0]; afficherCieTabs(); }
+  if(!CIE_CC  && CFG.compagnies.length){ CIE_CC =CFG.compagnies[0]; afficherCieTabs(); }
+}
+function setCie(ctx,cie){
+  if(ctx==='pol'){ CIE_POL=cie; SELECTION_POL.clear(); renderPolices(); }
+  if(ctx==='bdx'){ CIE_BDX=cie; renderBDX(); }
+  if(ctx==='cc'){ CIE_CC=cie; renderCC(); }
+  document.querySelectorAll(`#${ctx}-cie-tabs .cie-tab`).forEach(b=>b.classList.toggle('active', b.textContent===cie));
+}
+
+// ===================================================================
+// DOUBLONS
+// ===================================================================
+function detecterDoublons(polices){
+  const vus={}, doublons=new Set();
+  polices.forEach(p=>{ const k=p.police.trim().toUpperCase(); if(vus[k]) doublons.add(k); vus[k]=true; });
+  return doublons;
+}
+
+// ===================================================================
+// MODAL SAISIE
+// ===================================================================
+function toggleStatutFields(){
+  const st = document.getElementById('s-statut').value;
+  const showEnc = (st==='ENCAISSEE'||st==='REVERSEE');
+  const showRev = (st==='REVERSEE');
+  const showAnn = (st==='ANNULEE');
+  document.getElementById('grp-date-enc').style.display = showEnc?'flex':'none';
+  document.getElementById('grp-montant-enc').style.display = showEnc?'flex':'none';
+  document.getElementById('grp-date-rev').style.display = showRev?'flex':'none';
+  document.getElementById('grp-montant-rev').style.display = showRev?'flex':'none';
+  document.getElementById('grp-date-ann').style.display = showAnn?'flex':'none';
+}
+
+function ouvrirModalSaisie(id){
+  document.getElementById('s-edit-id').value = id||'';
+  document.getElementById('modal-doublon-alert').style.display='none';
+  if(id){
+    const p = getCiePolices(CIE_POL).find(x=>x.id===id);
+    if(p){
+      document.getElementById('s-police').value=p.police;
+      document.getElementById('s-assure').value=p.assure;
+      document.getElementById('s-branche').value=p.branche;
+      document.getElementById('s-souscription').value=p.souscription||'';
+      document.getElementById('s-effet').value=p.effet;
+      document.getElementById('s-echeance').value=p.echeance;
+      document.getElementById('s-pn').value=p.pn;
+      document.getElementById('s-acc').value=p.acc;
+      document.getElementById('s-taxes').value=p.taxes;
+      document.getElementById('s-statut').value=p.statut||'EMISE';
+      document.getElementById('s-date-enc').value=p.dateEnc||'';
+      document.getElementById('s-montant-enc').value=p.montantEnc||'';
+      document.getElementById('s-date-rev').value=p.dateRev||'';
+      document.getElementById('s-montant-rev').value=p.montantRev||'';
+      document.getElementById('s-date-ann').value=p.dateAnn||'';
+      calcModal();
+    }
+  } else {
+    ['s-police','s-assure','s-souscription','s-effet','s-echeance','s-date-enc','s-montant-enc','s-date-rev','s-montant-rev','s-date-ann'].forEach(f=>document.getElementById(f).value='');
+    ['s-pn','s-acc','s-taxes'].forEach(f=>document.getElementById(f).value=0);
+    document.getElementById('s-branche').value='';
+    document.getElementById('s-statut').value='EMISE';
+    ['s-ttc','s-comm'].forEach(f=>document.getElementById(f).value='');
+  }
+  toggleStatutFields();
+  document.getElementById('modal-saisie').classList.add('open');
+}
+
+function verifierDoublonModal(){
+  const police=document.getElementById('s-police').value.trim().toUpperCase();
+  const editId=document.getElementById('s-edit-id').value;
+  if(!police) return;
+  const existe = getCiePolices(CIE_POL).some(p=>p.police.toUpperCase()===police && p.id!==editId);
+  const el=document.getElementById('modal-doublon-alert');
+  if(existe){ el.textContent='⚠️ Ce numéro de police existe déjà.'; el.style.display='block'; }
+  else el.style.display='none';
+}
+
+function calcModal(){
+  const branche=document.getElementById('s-branche').value;
+  if(!branche) return;
+  const pn=parseFloat(document.getElementById('s-pn').value)||0;
+  const acc=parseFloat(document.getElementById('s-acc').value)||0;
+  const taxes=parseFloat(document.getElementById('s-taxes').value)||0;
+  const txC=getTxCSecours(branche,CIE_POL), txB=getTxB(branche,CIE_POL);
+  const commTotal = pn*txC/100 + pn*txB/100;
+  const ttc = pn+acc+taxes;
+  document.getElementById('s-ttc').value=Math.round(ttc);
+  document.getElementById('s-comm').value=Math.round(commTotal);
+}
+
+function validerSaisie(){
+  const police=document.getElementById('s-police').value.trim().toUpperCase();
+  const assure=document.getElementById('s-assure').value.trim();
+  const branche=document.getElementById('s-branche').value;
+  const effet=document.getElementById('s-effet').value;
+  const echeance=document.getElementById('s-echeance').value;
+  const pn=parseFloat(document.getElementById('s-pn').value)||0;
+  if(!police||!assure||!branche||!effet||!echeance||!pn){ alert('Champs obligatoires (*) manquants.'); return; }
+
+  const acc=parseFloat(document.getElementById('s-acc').value)||0;
+  const taxes=parseFloat(document.getElementById('s-taxes').value)||0;
+  const souscription=document.getElementById('s-souscription').value;
+  const statut=document.getElementById('s-statut').value;
+  const dateEnc=document.getElementById('s-date-enc').value;
+  const montantEnc=parseFloat(document.getElementById('s-montant-enc').value)||0;
+  const dateRev=document.getElementById('s-date-rev').value;
+  const montantRev=parseFloat(document.getElementById('s-montant-rev').value)||0;
+  const dateAnn=document.getElementById('s-date-ann').value;
+
+  // Validation de cohérence chronologique — alerte mais ne bloque pas la saisie,
+  // car certains cas (avenants, régularisations) peuvent légitimement sortir de l'ordre habituel.
+  const incoherences = [];
+  if(echeance && effet && echeance < effet) incoherences.push("la date d'échéance est antérieure à la date d'effet");
+  if(souscription && effet && souscription > effet) incoherences.push("la date de souscription est postérieure à la date d'effet");
+  if((statut==='ENCAISSEE'||statut==='REVERSEE') && dateEnc && effet && dateEnc < effet) incoherences.push("la date d'encaissement est antérieure à la date d'effet");
+  if(statut==='REVERSEE'){
+    if(!dateEnc) incoherences.push("le statut est \"Reversée\" mais aucune date d'encaissement n'est renseignée");
+    if(dateRev && dateEnc && dateRev < dateEnc) incoherences.push("la date de reversement est antérieure à la date d'encaissement");
+  }
+  if(incoherences.length){
+    const msg = "⚠️ Incohérence(s) détectée(s) :\n— " + incoherences.join("\n— ") + "\n\nEnregistrer quand même ?";
+    if(!confirm(msg)) return;
+  }
+
+  const txC=getTxCSecours(branche,CIE_POL), txB=getTxB(branche,CIE_POL);
+  const comm = pn*txC/100 + pn*txB/100;
+  const ttc = pn+acc+taxes;
+
+  const editId=document.getElementById('s-edit-id').value;
+  const record={ id:editId||uid(), police, assure, branche, brancheNonReconnue:false, souscription, effet, echeance,
+    pn, acc, taxes, txC, txB, comm, ttc, statut,
+    dateEnc: statut==='ENCAISSEE'||statut==='REVERSEE' ? dateEnc : '',
+    montantEnc: statut==='ENCAISSEE'||statut==='REVERSEE' ? montantEnc : 0,
+    dateRev: statut==='REVERSEE' ? dateRev : '',
+    montantRev: statut==='REVERSEE' ? montantRev : 0,
+    dateAnn: statut==='ANNULEE' ? dateAnn : ''
+  };
+
+  const polices=getCiePolices(CIE_POL);
+  const doublonExiste = polices.some(p=>p.police.toUpperCase()===police && p.id!==editId);
+  if(doublonExiste && !confirm(`⚠️ Le N° "${police}" existe déjà. Continuer ?`)) return;
+
+  if(editId){ const idx=polices.findIndex(x=>x.id===editId); if(idx>=0) polices[idx]=record; }
+  else polices.push(record);
+
+  sauvegarder();
+  fermerModal('modal-saisie');
+  renderPolices(); renderBDX(); renderRecap(); majStockageInfo();
+}
+
+// ===================================================================
+// IMPORT EXCEL (BDX Émission de référence)
+// ===================================================================
+// Normalise un en-tête de colonne pour le matching : majuscules, sans accents,
+// sans astérisque/parenthèses/ponctuation, espaces multiples réduits.
+function normaliserEntete(s){
+  return (s||'').toString()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g,'')   // enlève les accents
+    .toUpperCase()
+    .replace(/[*().:°]/g,' ')                            // enlève * ( ) . : °
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
+// Trouve la valeur d'une ligne en testant une liste de noms de colonnes candidats,
+// en comparant les en-têtes normalisés (insensible aux accents/astérisques/parenthèses).
+function getChamp(rowNorm, candidats){
+  for(const cand of candidats){
+    const cN = normaliserEntete(cand);
+    if(rowNorm[cN]!==undefined && rowNorm[cN]!=='') return rowNorm[cN];
+  }
+  return '';
+}
+
+function importerExcel(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const wb=XLSX.read(ev.target.result,{type:'binary'});
+      const ws=wb.Sheets[wb.SheetNames[0]];
+
+      // 1. Chercher la ligne d'en-tête en scannant les 20 premières lignes.
+      //    On exige plusieurs mots-clés de colonnes typiques sur la même ligne
+      //    (pas juste "POLICE" isolé, pour éviter de confondre avec une phrase
+      //    de note contenant accidentellement ce mot).
+      const rawRows = XLSX.utils.sheet_to_json(ws,{defval:'', header:1});
+      let headerIdx=-1;
+      const MOTS_CLES = ['POLICE','RISQUE','BRANCHE','CLIENT','ASSURE','PRIME','EFFET','ECHEANCE','TAXE','COMMISSION'];
+      for(let i=0;i<Math.min(rawRows.length,20);i++){
+        const cellules = rawRows[i].map(x=>normaliserEntete(x)).filter(c=>c!=='');
+        // Une vraie ligne d'en-tête a plusieurs CELLULES DISTINCTES courtes contenant des mots-clés,
+        // alors qu'une note est UNE SEULE longue cellule de phrase.
+        const nbCellulesAvecMotCle = cellules.filter(c => MOTS_CLES.some(mc => c.includes(mc)) && c.length<40).length;
+        if(nbCellulesAvecMotCle>=3){ headerIdx=i; break; }
+      }
+      if(headerIdx<0){
+        throw new Error("Impossible de trouver la ligne d'en-tête (colonnes attendues : N° Police, Risque, Client, Prime Nette... non détectées dans les 20 premières lignes).");
+      }
+      const useRows = XLSX.utils.sheet_to_json(ws,{defval:'', range: headerIdx});
+
+      const polices = getCiePolices(CIE_POL);
+      let nb=0, doublons=0, err=0;
+      const branchesNonReconnues = new Set();
+
+      useRows.forEach(row=>{
+        // Construire une version normalisée des clés de la ligne pour un matching robuste
+        const rowNorm = {};
+        Object.keys(row).forEach(k => { rowNorm[normaliserEntete(k)] = row[k]; });
+
+        const police = getChamp(rowNorm, ['NUMERO DE POLICE','N° POLICE','N POLICE','NUMERO POLICE','POLICE']).toString().trim().toUpperCase();
+        const assure = getChamp(rowNorm, ['CLIENT','NOM ASSURE','ASSURE','CLIENT ASSURE']).toString().trim();
+        const brancheBrute = getChamp(rowNorm, ['RISQUE','BRANCHE','RISQUE BRANCHE']).toString().trim();
+        const souscription = strDate(getChamp(rowNorm, ['DATE DE SOUSCRIPTION','DATE SOUSCRIPTION']));
+        const effet = strDate(getChamp(rowNorm, ['DATE EFFET']));
+        const echeance = strDate(getChamp(rowNorm, ['DATE ECHEANCE','DATE D ECHEANCE']));
+        const pnRaw = getChamp(rowNorm, ['PRIME NET','PRIME NETTE']);
+        const accRaw = getChamp(rowNorm, ['COUT DE POLICE','COUT POLICE','ACCESSOIRES']) || '0';
+        const taxesRaw = getChamp(rowNorm, ['TAXE','TAXES']) || '0';
+        const commRaw = getChamp(rowNorm, ['COMMISSION']);
+
+        const pn = pnRaw==='' ? null : (parseFloat(pnRaw.toString().replace(/\s/g,'').replace(',','.'))||0);
+        const acc = parseFloat(accRaw.toString().replace(/\s/g,'').replace(',','.'))||0;
+        const taxes = parseFloat(taxesRaw.toString().replace(/\s/g,'').replace(',','.'))||0;
+        const commImport = parseFloat(commRaw.toString().replace(/\s/g,'').replace(',','.'))||0;
+
+        if(!police||pn===null){ err++; return; }
+        if(polices.some(p=>p.police===police)) doublons++;
+
+        const { branche, reconnue } = normaliserBranche(brancheBrute || 'AUTO');
+        if(!reconnue){ branchesNonReconnues.add(brancheBrute || '(vide)'); }
+        const txC = getTxCSecours(branche, CIE_POL), txB = getTxB(branche, CIE_POL);
+        const comm = commImport>0 ? commImport : (pn*txC/100 + pn*txB/100);
+        const ttc = pn+acc+taxes;
+        polices.push({ id:uid(), police, assure, branche, brancheNonReconnue: !reconnue, souscription, effet, echeance,
+          pn, acc, taxes, txC, txB, comm, ttc, statut:'EMISE',
+          dateEnc:'', montantEnc:0, dateRev:'', montantRev:0, dateAnn:'' });
+        nb++;
+      });
+      sauvegarder();
+      renderPolices(); renderBDX(); renderRecap(); majStockageInfo();
+      const m=document.getElementById('import-msg');
+      if(nb===0){
+        m.className='alert alert-danger';
+        m.innerHTML = `✗ Aucune police importée. ${err} ligne(s) rejetée(s) — vérifie que les colonnes <strong>N° Police</strong> et <strong>Prime Nette</strong> sont bien renseignées.`;
+      } else {
+        m.className = branchesNonReconnues.size>0 ? 'alert alert-warning' : 'alert alert-success';
+        m.innerHTML = `✓ <strong>${nb}</strong> police(s) importée(s) (statut Émise).` +
+          (doublons>0?` <span class="doublon-badge">⚠️ ${doublons} doublon(s)</span>`:'') +
+          (err>0?` ${err} ligne(s) ignorée(s) (police ou prime nette manquante).`:'') +
+          (branchesNonReconnues.size>0?` <br>⚠️ <strong>Branche(s) NON RECONNUE(S)</strong> : ${[...branchesNonReconnues].map(b=>`<code>${b}</code>`).join(', ')} — taux de commission par défaut (15%) appliqué provisoirement. Corrige la branche de ces polices une par une (icône ✏️, repérables par le badge rouge "BRANCHE ?") avant de générer le Compte Courant.`:'');
+      }
+      m.style.display='block';
+    }catch(ex){
+      const m=document.getElementById('import-msg');
+      m.className='alert alert-danger'; m.textContent='✗ Erreur : '+ex.message; m.style.display='block';
+    }
+  };
+  reader.readAsBinaryString(file);
+  e.target.value='';
+}
+
+// ===================================================================
+// GESTION DES POLICES — AFFICHAGE
+// ===================================================================
+function cycleHTML(statut){
+  const steps = ['EMISE','ENCAISSEE','REVERSEE'];
+  if(statut==='ANNULEE'){
+    return `<div class="cycle-track"><span class="statut statut-annulee">Annulée</span></div>`;
+  }
+  const curIdx = steps.indexOf(statut);
+  let html = '<div class="cycle-track">';
+  steps.forEach((s,i)=>{
+    const cls = i<curIdx ? 'done' : (i===curIdx ? 'current' : '');
+    html += `<div class="cycle-step ${cls}" title="${STATUT_LABELS[s]}"></div>`;
+    if(i<steps.length-1) html += `<div class="cycle-line ${i<curIdx?'done':''}"></div>`;
+  });
+  html += '</div>';
+  return html;
+}
+
+function renderPolices(){
+  const polices = getCiePolices(CIE_POL);
+  const query = (document.getElementById('pol-search')?.value||'').toLowerCase();
+  const filtreStatut = document.getElementById('pol-filter-statut')?.value||'';
+  let filtered = polices;
+  if(query) filtered = filtered.filter(p=>p.police.toLowerCase().includes(query)||p.assure.toLowerCase().includes(query)||p.branche.toLowerCase().includes(query));
+  if(filtreStatut) filtered = filtered.filter(p=>p.statut===filtreStatut);
+
+  document.getElementById('pol-cie-active').textContent = CIE_POL||'—';
+  document.getElementById('pol-periode').textContent = TRIM+' · '+ANNEE;
+  document.getElementById('pol-nb').textContent = polices.length;
+  document.getElementById('pol-nb-emise').textContent = polices.filter(p=>p.statut==='EMISE').length;
+  document.getElementById('pol-nb-enc').textContent = polices.filter(p=>p.statut==='ENCAISSEE').length;
+  document.getElementById('pol-nb-rev').textContent = polices.filter(p=>p.statut==='REVERSEE').length;
+  document.getElementById('pol-nb-ann').textContent = polices.filter(p=>p.statut==='ANNULEE').length;
+
+  const doublons = detecterDoublons(polices);
+  const dbAlert = document.getElementById('doublon-alert');
+  if(doublons.size>0){
+    dbAlert.style.display='block';
+    dbAlert.innerHTML = `⚠️ <strong>${doublons.size} doublon(s)</strong> : ${[...doublons].map(d=>`<code>${d}</code>`).join(', ')}`;
+  } else dbAlert.style.display='none';
+
+  const policesBrancheNR = polices.filter(p=>p.brancheNonReconnue);
+  const brAlert = document.getElementById('branche-alert');
+  if(policesBrancheNR.length>0){
+    brAlert.style.display='block';
+    const branchesUniques = [...new Set(policesBrancheNR.map(p=>p.branche))];
+    brAlert.innerHTML = `⚠️ <strong>${policesBrancheNR.length} police(s) avec branche NON RECONNUE</strong> (${branchesUniques.map(b=>`<code>${b}</code>`).join(', ')}) — taux de commission par défaut (15%) appliqué provisoirement. Le Compte Courant peut être inexact tant que ces polices ne sont pas corrigées. Repérables ci-dessous par le badge rouge "BRANCHE ?".`;
+  } else brAlert.style.display='none';
+
+  const tbody=document.getElementById('pol-body');
+  if(!filtered.length){
+    tbody.innerHTML = `<tr><td colspan="11" style="text-align:center;padding:26px;color:#999;">${query||filtreStatut?'Aucun résultat.':'Aucune police. Importer ou saisir manuellement.'}</td></tr>`;
+    document.getElementById('pol-foot').innerHTML='';
+    majBulkBar();
+    return;
+  }
+  // Nettoyer la sélection des polices qui ne sont plus dans le filtre/compagnie courante
+  const idsVisibles = new Set(filtered.map(p=>p.id));
+  tbody.innerHTML = filtered.map((p,i)=>{
+    const isDbl = doublons.has(p.police.toUpperCase());
+    const isBrNR = !!p.brancheNonReconnue;
+    const checked = SELECTION_POL.has(p.id) ? 'checked' : '';
+    return `<tr ${isDbl||isBrNR?'style="background:#fff5f5;"':''}>
+      <td class="no-print"><input type="checkbox" class="chk-pol" data-id="${p.id}" ${checked} onchange="toggleSelectionPol('${p.id}',this.checked)"></td>
+      <td>${i+1}${isDbl?' <span class="doublon-badge">DBL</span>':''}</td>
+      <td><strong>${p.police}</strong></td>
+      <td>${p.assure}</td>
+      <td><span class="badge badge-primary">${p.branche}</span>${isBrNR?' <span class="doublon-badge" title="Branche non reconnue — taux de commission par défaut appliqué, à corriger">BRANCHE ?</span>':''}</td>
+      <td>${fmtDate(p.effet)}</td>
+      <td class="num">${fmt(p.ttc)}</td>
+      <td class="num">${fmt(p.comm)}</td>
+      <td><span class="statut statut-${p.statut.toLowerCase()}">${STATUT_LABELS[p.statut]}</span></td>
+      <td>${cycleHTML(p.statut)}</td>
+      <td class="no-print">
+        <button class="btn-secondary btn-sm" onclick="ouvrirModalSaisie('${p.id}')">✏️</button>
+        <button class="btn-danger btn-sm" onclick="supprimerPolice('${p.id}')">🗑️</button>
+      </td>
+    </tr>`;
+  }).join('');
+
+  const totTTC=filtered.reduce((s,p)=>s+p.ttc,0);
+  const totComm=filtered.reduce((s,p)=>s+p.comm,0);
+  document.getElementById('pol-foot').innerHTML = `<tr>
+    <td class="no-print"></td>
+    <td colspan="5" style="text-align:right;">TOTAUX (${filtered.length})</td>
+    <td class="num">${fmt(totTTC)}</td><td class="num">${fmt(totComm)}</td>
+    <td colspan="3" class="no-print"></td></tr>`;
+
+  majBulkBar();
+}
+
+// ===================================================================
+// SÉLECTION MULTIPLE & ACTIONS GROUPÉES
+// ===================================================================
+function toggleSelectionPol(id, checked){
+  if(checked) SELECTION_POL.add(id); else SELECTION_POL.delete(id);
+  majBulkBar();
+}
+function toggleSelectAll(chk){
+  document.querySelectorAll('.chk-pol').forEach(cb=>{
+    cb.checked = chk.checked;
+    const id = cb.getAttribute('data-id');
+    if(chk.checked) SELECTION_POL.add(id); else SELECTION_POL.delete(id);
+  });
+  majBulkBar();
+}
+function deselectionnerTout(){
+  SELECTION_POL.clear();
+  renderPolices();
+}
+function getPolicesSelectionnees(){
+  const polices = getCiePolices(CIE_POL);
+  return polices.filter(p=>SELECTION_POL.has(p.id));
+}
+function majBulkBar(){
+  const bar = document.getElementById('bulk-action-bar');
+  const sel = getPolicesSelectionnees();
+  const chkAll = document.getElementById('chk-select-all');
+  const visibles = document.querySelectorAll('.chk-pol');
+  if(chkAll && visibles.length){
+    const tousVisiblesCoches = Array.from(visibles).every(cb=>cb.checked);
+    chkAll.checked = tousVisiblesCoches;
+  }
+  if(!sel.length){ bar.style.display='none'; return; }
+  bar.style.display='flex';
+  document.getElementById('bulk-count-label').textContent = `${sel.length} police(s) sélectionnée(s)`;
+
+  // Le bouton Encaisser n'a de sens que pour des polices encore Émises
+  const nbEncaissable = sel.filter(p=>p.statut==='EMISE').length;
+  // Le bouton Reverser n'a de sens que pour des polices déjà Encaissées
+  const nbReversable = sel.filter(p=>p.statut==='ENCAISSEE').length;
+
+  const btnEnc = document.getElementById('btn-bulk-encaisser');
+  const btnRev = document.getElementById('btn-bulk-reverser');
+  btnEnc.style.display = nbEncaissable>0 ? 'inline-block' : 'none';
+  btnRev.style.display = nbReversable>0 ? 'inline-block' : 'none';
+  btnEnc.textContent = `💵 Encaisser la sélection (${nbEncaissable})`;
+  btnRev.textContent = `🏦 Reverser la sélection (${nbReversable})`;
+}
+
+let GROUPE_TYPE = 'ENCAISSEMENT'; // ou 'REVERSEMENT'
+
+function ouvrirModalGroupe(type){
+  GROUPE_TYPE = type;
+  const sel = getPolicesSelectionnees();
+  const eligibles = type==='ENCAISSEMENT'
+    ? sel.filter(p=>p.statut==='EMISE')
+    : sel.filter(p=>p.statut==='ENCAISSEE');
+
+  if(!eligibles.length){
+    alert(type==='ENCAISSEMENT'
+      ? "Aucune police sélectionnée n'a le statut 'Émise' (seules les polices Émises peuvent être encaissées)."
+      : "Aucune police sélectionnée n'a le statut 'Encaissée' (seules les polices Encaissées peuvent être reversées).");
+    return;
+  }
+
+  document.getElementById('modal-groupe-titre').textContent = type==='ENCAISSEMENT' ? '💵 Encaisser la sélection' : '🏦 Reverser la sélection';
+  document.getElementById('modal-groupe-desc').textContent = type==='ENCAISSEMENT'
+    ? `${eligibles.length} police(s) éligible(s) (statut Émise) passeront au statut Encaissée.`
+    : `${eligibles.length} police(s) éligible(s) (statut Encaissée) passeront au statut Reversée.`;
+  document.getElementById('lbl-groupe-date').textContent = type==='ENCAISSEMENT' ? 'Date Encaissement (appliquée à toute la sélection) *' : 'Date Reversement (appliquée à toute la sélection) *';
+  document.getElementById('lbl-groupe-montant').textContent = type==='ENCAISSEMENT' ? 'Mode de montant encaissé' : 'Mode de montant reversé';
+  document.getElementById('g-mode-montant').innerHTML = type==='ENCAISSEMENT'
+    ? `<option value="ttc">= Prime TTC de chaque police (recommandé)</option><option value="manuel">Saisir un montant unique pour toutes</option>`
+    : `<option value="ttc">= Prime TTC de chaque police (recommandé)</option><option value="encaisse">= Montant Encaissé de chaque police</option><option value="manuel">Saisir un montant unique pour toutes</option>`;
+
+  const listeEl = document.getElementById('modal-groupe-liste');
+  listeEl.innerHTML = eligibles.map(p=>`<div>• <strong>${p.police}</strong> — ${p.assure} — ${fmt(p.ttc)}</div>`).join('');
+
+  document.getElementById('g-date').value = '';
+  document.getElementById('g-montant-manuel').value = '';
+  document.getElementById('g-mode-montant').value = 'ttc';
+  toggleModeMontantGroupe();
+  document.getElementById('modal-groupe-alert').style.display='none';
+  document.getElementById('modal-groupe').classList.add('open');
+}
+
+function toggleModeMontantGroupe(){
+  const mode = document.getElementById('g-mode-montant').value;
+  document.getElementById('grp-g-montant-manuel').style.display = mode==='manuel' ? 'flex' : 'none';
+}
+
+function validerActionGroupe(){
+  const date = document.getElementById('g-date').value;
+  if(!date){
+    const a = document.getElementById('modal-groupe-alert');
+    a.textContent = '⚠️ La date est obligatoire.'; a.style.display='block';
+    return;
+  }
+  const mode = document.getElementById('g-mode-montant').value;
+  const montantManuel = parseFloat(document.getElementById('g-montant-manuel').value)||0;
+  if(mode==='manuel' && !montantManuel){
+    const a = document.getElementById('modal-groupe-alert');
+    a.textContent = '⚠️ Indique un montant unique valide.'; a.style.display='block';
+    return;
+  }
+
+  const sel = getPolicesSelectionnees();
+
+  // Vérifier la cohérence de la date unique appliquée par rapport à chaque police du lot
+  if(GROUPE_TYPE==='ENCAISSEMENT'){
+    const avantEffet = sel.filter(p=>p.statut==='EMISE' && p.effet && date < p.effet);
+    if(avantEffet.length && !confirm(`⚠️ La date d'encaissement (${date}) est antérieure à la date d'effet pour ${avantEffet.length} police(s) de la sélection (ex: ${avantEffet[0].police}).\n\nContinuer quand même ?`)) return;
+  } else {
+    const avantEnc = sel.filter(p=>p.statut==='ENCAISSEE' && p.dateEnc && date < p.dateEnc);
+    if(avantEnc.length && !confirm(`⚠️ La date de reversement (${date}) est antérieure à la date d'encaissement pour ${avantEnc.length} police(s) de la sélection (ex: ${avantEnc[0].police}).\n\nContinuer quand même ?`)) return;
+  }
+
+  const polices = getCiePolices(CIE_POL);
+  let nb = 0;
+
+  if(GROUPE_TYPE==='ENCAISSEMENT'){
+    sel.filter(p=>p.statut==='EMISE').forEach(p=>{
+      const idx = polices.findIndex(x=>x.id===p.id);
+      if(idx<0) return;
+      const montant = mode==='manuel' ? montantManuel : polices[idx].ttc;
+      polices[idx].statut = 'ENCAISSEE';
+      polices[idx].dateEnc = date;
+      polices[idx].montantEnc = montant;
+      nb++;
+    });
+  } else {
+    sel.filter(p=>p.statut==='ENCAISSEE').forEach(p=>{
+      const idx = polices.findIndex(x=>x.id===p.id);
+      if(idx<0) return;
+      let montant;
+      if(mode==='manuel') montant = montantManuel;
+      else if(mode==='encaisse') montant = polices[idx].montantEnc || polices[idx].ttc;
+      else montant = polices[idx].ttc;
+      polices[idx].statut = 'REVERSEE';
+      polices[idx].dateRev = date;
+      polices[idx].montantRev = montant;
+      nb++;
+    });
+  }
+
+  sauvegarder();
+  SELECTION_POL.clear();
+  fermerModal('modal-groupe');
+  renderPolices(); renderBDX(); renderCC(); renderRecap(); majStockageInfo();
+
+  const m = document.getElementById('import-msg');
+  if(m){
+    m.className='alert alert-success';
+    m.textContent = `✓ ${nb} police(s) passée(s) au statut ${GROUPE_TYPE==='ENCAISSEMENT'?'Encaissée':'Reversée'}.`;
+    m.style.display='block';
+  }
+}
+
+function supprimerPolice(id){
+  if(!confirm('Supprimer cette police ?')) return;
+  const pd=getPeriodeData();
+  pd[CIE_POL] = (pd[CIE_POL]||[]).filter(p=>p.id!==id);
+  SELECTION_POL.delete(id);
+  sauvegarder(); renderPolices(); renderBDX(); renderRecap(); majStockageInfo();
+}
+function viderPolices(){
+  if(!confirm(`Vider toutes les polices ${CIE_POL} — ${TRIM} ${ANNEE} ? Irréversible.`)) return;
+  getPeriodeData()[CIE_POL]=[];
+  SELECTION_POL.clear();
+  sauvegarder(); renderPolices(); renderBDX(); renderRecap(); majStockageInfo();
+}
+function exporterPolicesExcel(){
+  const polices=getCiePolices(CIE_POL);
+  if(!polices.length){ alert('Aucune donnée.'); return; }
+  const data=polices.map((p,i)=>({'N°':i+1,'N° POLICE':p.police,'CLIENT':p.assure,'RISQUE':p.branche,
+    'DATE SOUSCRIPTION':fmtDate(p.souscription),'DATE EFFET':fmtDate(p.effet),'DATE ECHEANCE':fmtDate(p.echeance),
+    'PRIME NET':Math.round(p.pn),'COUT DE POLICE':Math.round(p.acc),'TAXE':Math.round(p.taxes),'PRIME TTC':Math.round(p.ttc),
+    'COMMISSION':Math.round(p.comm),'STATUT':STATUT_LABELS[p.statut],
+    'DATE ENCAISSEMENT':fmtDate(p.dateEnc),'MONTANT ENCAISSE':Math.round(p.montantEnc||0),
+    'DATE REVERSEMENT':fmtDate(p.dateRev),'MONTANT REVERSE':Math.round(p.montantRev||0),
+    'DATE ANNULATION':fmtDate(p.dateAnn)}));
+  const ws=XLSX.utils.json_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'Polices '+CIE_POL);
+  XLSX.writeFile(wb,`${CABINET}_Polices_${CIE_POL}_${TRIM}_${ANNEE}.xlsx`);
+}
+
+// ===================================================================
+// LES 4 BDX
+// ===================================================================
+function setBdxType(type, btn){
+  BDX_TYPE = type;
+  document.querySelectorAll('.subtab-btn').forEach(b=>b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  renderBDX();
+}
+
+function getBdxRows(type, cie){
+  const polices = getCiePolices(cie);
+  if(type==='EMISSION') return polices; // toutes (y compris annulées, conforme C9)
+  if(type==='ENCAISSEMENT') return polices.filter(p=>p.statut==='ENCAISSEE'||p.statut==='REVERSEE');
+  if(type==='REVERSEMENT') return polices.filter(p=>p.statut==='REVERSEE');
+  if(type==='ANNULATION') return polices.filter(p=>p.statut==='ANNULEE');
+  return [];
+}
+
+function renderBDX(){
+  const polices = getCiePolices(CIE_BDX);
+  ['EMISSION','ENCAISSEMENT','REVERSEMENT','ANNULATION'].forEach(t=>{
+    document.getElementById('cnt-'+t.toLowerCase()).textContent = getBdxRows(t, CIE_BDX).length;
+  });
+
+  const titres = {EMISSION:"D'ÉMISSION", ENCAISSEMENT:"D'ENCAISSEMENT", REVERSEMENT:"DE REVERSEMENT", ANNULATION:"D'ANNULATION"};
+  document.getElementById('bdx-titre').textContent = titres[BDX_TYPE];
+  document.getElementById('bdx-cie-active').textContent = CIE_BDX||'—';
+  document.getElementById('bdx-periode').textContent = TRIM+' · '+ANNEE;
+
+  const rows = getBdxRows(BDX_TYPE, CIE_BDX);
+  document.getElementById('bdx-nb').textContent = rows.length;
+  const totTTC = rows.reduce((s,p)=>s+p.ttc,0);
+  document.getElementById('bdx-ttc').textContent = fmt(totTTC);
+
+  const el = document.getElementById('bdx-content');
+  if(!rows.length){
+    el.innerHTML = `<div class="empty-state"><div class="icon">📑</div><p>Aucune ligne pour le BDX ${titres[BDX_TYPE]} — ${CIE_BDX} — ${TRIM} ${ANNEE}.</p></div>`;
+    return;
+  }
+
+  let extraCols = '';
+  let extraColsAlign = '';
+  if(BDX_TYPE==='ENCAISSEMENT'){ extraCols = '<th>Date Encaissement</th><th>Montant Encaissé</th>'; extraColsAlign = '<th>Date Encaissement</th><th class="num">Montant Encaissé</th>'; }
+  if(BDX_TYPE==='REVERSEMENT'){ extraCols = '<th>Date Reversement</th><th>Montant Reversé</th>'; extraColsAlign = '<th>Date Reversement</th><th class="num">Montant Reversé</th>'; }
+  if(BDX_TYPE==='ANNULATION'){ extraCols = '<th>Date Annulation</th>'; extraColsAlign = '<th>Date Annulation</th>'; }
+
+  let bodyRows = rows.map((p,i)=>{
+    let extra = '';
+    if(BDX_TYPE==='ENCAISSEMENT') extra = `<td>${fmtDate(p.dateEnc)}</td><td class="num">${fmt(p.montantEnc)}</td>`;
+    if(BDX_TYPE==='REVERSEMENT') extra = `<td>${fmtDate(p.dateRev)}</td><td class="num">${fmt(p.montantRev)}</td>`;
+    if(BDX_TYPE==='ANNULATION') extra = `<td>${fmtDate(p.dateAnn)}</td>`;
+    return `<tr>
+      <td>${i+1}</td><td><strong>${p.police}</strong></td><td><span class="badge badge-primary">${p.branche}</span></td>
+      <td>${p.assure}</td><td>${fmtDate(p.souscription)}</td><td>${fmtDate(p.effet)}</td><td>${fmtDate(p.echeance)}</td>
+      <td class="num">${fmt(p.pn)}</td><td class="num">${fmt(p.acc)}</td><td class="num">${fmt(p.taxes)}</td>
+      <td class="num" style="font-weight:700;color:var(--pca-primary);">${fmt(p.ttc)}</td>
+      <td class="num" style="color:var(--pca-success);font-weight:700;">${fmt(p.comm)}</td>
+      ${extra}
+    </tr>`;
+  }).join('');
+
+  const totPN=rows.reduce((s,p)=>s+p.pn,0), totAcc=rows.reduce((s,p)=>s+p.acc,0),
+        totTax=rows.reduce((s,p)=>s+p.taxes,0), totComm=rows.reduce((s,p)=>s+p.comm,0);
+  let totExtra='';
+  if(BDX_TYPE==='ENCAISSEMENT'){ const totM=rows.reduce((s,p)=>s+(p.montantEnc||0),0); totExtra=`<td></td><td class="num">${fmt(totM)}</td>`; }
+  if(BDX_TYPE==='REVERSEMENT'){ const totM=rows.reduce((s,p)=>s+(p.montantRev||0),0); totExtra=`<td></td><td class="num">${fmt(totM)}</td>`; }
+  if(BDX_TYPE==='ANNULATION'){ totExtra=`<td></td>`; }
+
+  el.innerHTML = `<div class="table-wrap"><table>
+    <thead><tr><th>N°</th><th>N° Police</th><th>Risque</th><th>Client</th><th>Date Soucr.</th><th>Date Effet</th><th>Date Échéance</th>
+    <th class="num">Prime Net</th><th class="num">Coût Police</th><th class="num">Taxe</th><th class="num">Prime TTC</th><th class="num">Commission</th>${extraColsAlign}</tr></thead>
+    <tbody>${bodyRows}</tbody>
+    <tfoot><tr><td colspan="7" style="text-align:right;">TOTAUX (${rows.length})</td>
+    <td class="num">${fmt(totPN)}</td><td class="num">${fmt(totAcc)}</td><td class="num">${fmt(totTax)}</td>
+    <td class="num">${fmt(totTTC)}</td><td class="num">${fmt(totComm)}</td>${totExtra}</tr></tfoot>
+  </table></div>`;
+}
+
+function exporterBdxTypeExcel(){
+  const rows = getBdxRows(BDX_TYPE, CIE_BDX);
+  if(!rows.length){ alert('Aucune donnée à exporter.'); return; }
+  const titres = {EMISSION:"EMISSION", ENCAISSEMENT:"ENCAISSEMENT", REVERSEMENT:"REVERSEMENT", ANNULATION:"ANNULATION"};
+  const data = rows.map((p,i)=>{
+    const base = {'NUMERO':i+1,'NUMERO DE POLICE':p.police,'RISQUE':p.branche,'CLIENT':p.assure,
+      'DATE DE SOUSCRIPTION':fmtDate(p.souscription),'DATE EFFET':fmtDate(p.effet),'DATE ECHEANCE':fmtDate(p.echeance),
+      'PRIME NET':Math.round(p.pn),'COUT DE POLICE':Math.round(p.acc),'TAXE':Math.round(p.taxes),
+      'PRIME TTC':Math.round(p.ttc),'COMMISSION':Math.round(p.comm)};
+    if(BDX_TYPE==='ENCAISSEMENT'){ base['DATE ENCAISSEMENT']=fmtDate(p.dateEnc); base['MONTANT ENCAISSE']=Math.round(p.montantEnc||0); }
+    if(BDX_TYPE==='REVERSEMENT'){ base['DATE REVERSEMENT']=fmtDate(p.dateRev); base['MONTANT REVERSE']=Math.round(p.montantRev||0); }
+    return base;
+  });
+  const ws=XLSX.utils.json_to_sheet(data);
+  const wb=XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb,ws,'BDX '+titres[BDX_TYPE]);
+  XLSX.writeFile(wb, `${CABINET}_BDX_${titres[BDX_TYPE]}_${CIE_BDX}_${TRIM}_${ANNEE}.xlsx`);
+}
+
+// ===================================================================
+// COMPTE COURANT — DOUBLE VUE (Encaissé vs Reversé)
+// ===================================================================
+function renderCC(){
+  const cie = CIE_CC;
+  const polices = getCiePolices(cie);
+  const el = document.getElementById('cc-content');
+  if(!polices.length){
+    el.innerHTML = `<div class="empty-state"><div class="icon">📂</div><p>Aucune police pour <strong>${cie}</strong> — ${TRIM} ${ANNEE}.</p></div>`;
+    return;
+  }
+
+  // Vue ENCAISSÉ : toutes polices avec statut ENCAISSEE ou REVERSEE (l'argent est entré chez PCA)
+  const encaissees = polices.filter(p=>p.statut==='ENCAISSEE'||p.statut==='REVERSEE');
+  const totEncTTC = encaissees.reduce((s,p)=>s+(p.montantEnc||p.ttc),0);
+  const totEncComm = encaissees.reduce((s,p)=>s+p.comm,0);
+  const soldeEnc = totEncTTC - totEncComm;
+
+  // Vue REVERSÉ : uniquement polices REVERSEE (l'argent est sorti vers la compagnie)
+  const reversees = polices.filter(p=>p.statut==='REVERSEE');
+  const totRevTTC = reversees.reduce((s,p)=>s+(p.montantRev||p.ttc),0);
+  const totRevComm = reversees.reduce((s,p)=>s+p.comm,0);
+  const soldeRev = totRevTTC - totRevComm;
+
+  // Annulations à titre informatif
+  const annulees = polices.filter(p=>p.statut==='ANNULEE');
+  const totAnnTTC = annulees.reduce((s,p)=>s+p.ttc,0);
+  const totAnnComm = annulees.reduce((s,p)=>s+p.comm,0);
+
+  // Écart en transit (encaissé mais pas encore reversé)
+  const enTransit = totEncTTC - totRevTTC;
+
+  el.innerHTML = `
+    <div class="card" style="border-top:4px solid var(--pca-accent);">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+        <div>
+          <div style="font-size:1.15em;font-weight:800;color:var(--pca-primary);">COMPTE COURANT</div>
+          <div style="color:#666;font-size:.85em;">${getCabinetInfo(CABINET).nom} ↔ ${cie} — ${TRIM} ${ANNEE}</div>
+          <div style="color:#999;font-size:.76em;">${polices.length} police(s) au total · ${annulees.length} annulée(s)</div>
+        </div>
+        <div class="btn-group no-print">
+          <button class="btn-success btn-sm" onclick="exporterCCExcel('${cie}')">⬇️ Excel</button>
+          <button class="btn-secondary btn-sm" onclick="window.print()">🖨️ PDF</button>
+        </div>
+      </div>
+
+      ${annulees.length>0 ? `<div class="alert alert-warning">⚠️ ${annulees.length} police(s) annulée(s) (Prime TTC ${fmt(totAnnTTC)} / Commission ${fmt(totAnnComm)}) — exclues du calcul ci-dessous, conformément à l'état CIMA C9.</div>` : ''}
+
+      <div class="cc-dual">
+        <!-- VUE ENCAISSÉ -->
+        <div>
+          <div class="cc-block">
+            <div class="cc-block-title" style="background:var(--pca-success);">💵 VUE ENCAISSÉ (${encaissees.length} police(s))</div>
+            <div class="cc-row"><span>Primes TTC encaissées</span><span class="cc-amount">${fmt(totEncTTC)}</span></div>
+            <div class="cc-row"><span>Commission (base+bonus)</span><span class="cc-amount" style="color:var(--pca-success);">${fmt(totEncComm)}</span></div>
+            <div class="cc-row total"><span>NET DÛ À ${cie}</span><span class="cc-amount">${fmt(soldeEnc)}</span></div>
+          </div>
+        </div>
+        <!-- VUE REVERSÉ -->
+        <div>
+          <div class="cc-block">
+            <div class="cc-block-title" style="background:var(--pca-purple);">🏦 VUE REVERSÉ (${reversees.length} police(s))</div>
+            <div class="cc-row"><span>Primes TTC reversées</span><span class="cc-amount">${fmt(totRevTTC)}</span></div>
+            <div class="cc-row"><span>Commission (base+bonus)</span><span class="cc-amount" style="color:var(--pca-purple);">${fmt(totRevComm)}</span></div>
+            <div class="cc-row total"><span>NET DÉJÀ REVERSÉ</span><span class="cc-amount">${fmt(soldeRev)}</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="cc-block">
+        <div class="cc-row solde" style="background:${enTransit>=0?'var(--pca-warning)':'var(--pca-danger)'};">
+          <span style="font-size:.92em;">${enTransit>=0?('⏳ EN TRANSIT — Encaissé mais pas encore reversé à '+cie):"⚠️ ANOMALIE — Reversé supérieur à l'encaissé"}</span>
+          <span class="cc-amount" style="font-size:1.1em;">${fmt(Math.abs(enTransit))}</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📅 Ventilation mensuelle — Vue Encaissé · ${cie}
+        <span class="text-muted" style="font-weight:400;font-size:.78em;margin-left:8px;">(tenue mensuelle — Art. 559 Code CIMA)</span>
+      </div>
+      <div class="table-wrap">${tableParMois(encaissees, TRIM, ANNEE)}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">📊 Détail par branche — Vue Encaissé · ${cie}</div>
+      <div class="table-wrap">${tableParBranche(encaissees)}</div>
+    </div>`;
+}
+
+// Répartit les polices par mois civil du trimestre, sur la base de la date d'encaissement
+// (ou de la date d'effet à défaut). Permet de documenter la tenue mensuelle du compte courant
+// exigée par l'Article 559 du Code CIMA, sans changer la façon de saisir au quotidien.
+function moisDuTrimestre(trim, annee){
+  const base = {T1:1, T2:4, T3:7, T4:10}[trim] || 1;
+  const noms = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  return [0,1,2].map(i => {
+    const m = base + i;
+    return { num: m, label: noms[m-1] + ' ' + annee, cle: annee + '-' + String(m).padStart(2,'0') };
+  });
+}
+
+function tableParMois(polices, trim, annee){
+  const mois = moisDuTrimestre(trim, annee);
+  const buckets = {};
+  mois.forEach(m => buckets[m.cle] = {nb:0, ttc:0, comm:0});
+  let sansDate = 0;
+
+  polices.forEach(p => {
+    const dateRef = p.dateEnc || p.effet;
+    if(!dateRef){ sansDate++; return; }
+    const cle = dateRef.slice(0,7); // YYYY-MM
+    if(buckets[cle]){
+      buckets[cle].nb++; buckets[cle].ttc += (p.montantEnc||p.ttc); buckets[cle].comm += p.comm;
+    } else {
+      // Date hors du trimestre affiché (régularisation tardive) — comptée à part, jamais perdue silencieusement
+      if(!buckets['_hors_periode']) buckets['_hors_periode'] = {nb:0, ttc:0, comm:0};
+      buckets['_hors_periode'].nb++; buckets['_hors_periode'].ttc += (p.montantEnc||p.ttc); buckets['_hors_periode'].comm += p.comm;
+    }
+  });
+
+  const totNb = mois.reduce((s,m)=>s+buckets[m.cle].nb,0);
+  const totTTC = mois.reduce((s,m)=>s+buckets[m.cle].ttc,0);
+  const totComm = mois.reduce((s,m)=>s+buckets[m.cle].comm,0);
+
+  let rows = mois.map(m => `
+    <tr>
+      <td><strong>${m.label}</strong></td>
+      <td class="num">${buckets[m.cle].nb}</td>
+      <td class="num">${fmt(buckets[m.cle].ttc)}</td>
+      <td class="num">${fmt(buckets[m.cle].comm)}</td>
+    </tr>`).join('');
+
+  if(buckets['_hors_periode']){
+    rows += `<tr style="background:#fff8e1;">
+      <td><strong>⚠️ Hors période (régularisation)</strong></td>
+      <td class="num">${buckets['_hors_periode'].nb}</td>
+      <td class="num">${fmt(buckets['_hors_periode'].ttc)}</td>
+      <td class="num">${fmt(buckets['_hors_periode'].comm)}</td>
+    </tr>`;
+  }
+
+  const noteSansDate = sansDate>0 ? `<p class="text-muted" style="margin-top:6px;">⚠️ ${sansDate} police(s) sans date d'encaissement ni date d'effet exploitable, non ventilée(s) ci-dessus.</p>` : '';
+
+  return `<table>
+    <thead><tr><th>Mois</th><th class="num">Polices</th><th class="num">Σ Prime TTC encaissée</th><th class="num">Σ Commission</th></tr></thead>
+    <tbody>${rows}</tbody>
+    <tfoot><tr><td>TOTAL TRIMESTRE</td><td class="num">${totNb}</td><td class="num">${fmt(totTTC)}</td><td class="num">${fmt(totComm)}</td></tr></tfoot>
+  </table>${noteSansDate}`;
+}
+
+function tableParBranche(polices){
+  const par={};
+  polices.forEach(p=>{
+    if(!par[p.branche]) par[p.branche]={nb:0,ttc:0,comm:0};
+    par[p.branche].nb++; par[p.branche].ttc+=p.ttc; par[p.branche].comm+=p.comm;
+  });
+  const totTTC=polices.reduce((s,p)=>s+p.ttc,0), totComm=polices.reduce((s,p)=>s+p.comm,0);
+  return `<table><thead><tr><th>Branche</th><th class="num">Polices</th><th class="num">Σ Prime TTC</th><th class="num">Σ Commission</th></tr></thead>
+    <tbody>${Object.entries(par).map(([br,v])=>`<tr><td><span class="badge badge-primary">${br}</span></td>
+      <td class="num">${v.nb}</td><td class="num" style="font-weight:700;">${fmt(v.ttc)}</td>
+      <td class="num" style="color:var(--pca-success);">${fmt(v.comm)}</td></tr>`).join('')}</tbody>
+    <tfoot><tr><td>TOTAL</td><td class="num">${polices.length}</td><td class="num">${fmt(totTTC)}</td><td class="num">${fmt(totComm)}</td></tr></tfoot></table>`;
+}
+
+function exporterCCExcel(cie){
+  const polices=getCiePolices(cie);
+  if(!polices.length){ alert('Aucune donnée.'); return; }
+  const encaissees=polices.filter(p=>p.statut==='ENCAISSEE'||p.statut==='REVERSEE');
+  const reversees=polices.filter(p=>p.statut==='REVERSEE');
+  const annulees=polices.filter(p=>p.statut==='ANNULEE');
+  const totEncTTC=encaissees.reduce((s,p)=>s+(p.montantEnc||p.ttc),0);
+  const totEncComm=encaissees.reduce((s,p)=>s+p.comm,0);
+  const totRevTTC=reversees.reduce((s,p)=>s+(p.montantRev||p.ttc),0);
+  const totRevComm=reversees.reduce((s,p)=>s+p.comm,0);
+
+  const wb=XLSX.utils.book_new();
+  const ccData=[
+    ['COMPTE COURANT — '+getCabinetInfo(CABINET).nom+' ↔ '+cie],
+    ['Période : '+TRIM+' '+ANNEE+' — '+polices.length+' police(s) — '+annulees.length+' annulée(s)'],[''],
+    ['VUE ENCAISSÉ'],
+    ['Primes TTC encaissées', Math.round(totEncTTC)],
+    ['Commission (base+bonus)', Math.round(totEncComm)],
+    ['NET DÛ À LA COMPAGNIE', Math.round(totEncTTC-totEncComm)],[''],
+    ['VUE REVERSÉ'],
+    ['Primes TTC reversées', Math.round(totRevTTC)],
+    ['Commission (base+bonus)', Math.round(totRevComm)],
+    ['NET DÉJÀ REVERSÉ', Math.round(totRevTTC-totRevComm)],[''],
+    ['EN TRANSIT (encaissé non reversé)', Math.round(totEncTTC-totRevTTC)]
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(ccData), 'Compte Courant');
+
+  ['EMISSION','ENCAISSEMENT','REVERSEMENT','ANNULATION'].forEach(t=>{
+    const rows=getBdxRows(t,cie);
+    if(!rows.length) return;
+    const data=rows.map((p,i)=>({'N°':i+1,'N° POLICE':p.police,'CLIENT':p.assure,'RISQUE':p.branche,
+      'PRIME TTC':Math.round(p.ttc),'COMMISSION':Math.round(p.comm)}));
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), 'BDX '+t.substr(0,20));
+  });
+  XLSX.writeFile(wb, `${CABINET}_CC_${cie}_${TRIM}_${ANNEE}.xlsx`);
+}
+
+// ===================================================================
+// RÉCAPITULATIF
+// ===================================================================
+function renderRecap(){
+  const el=document.getElementById('recap-content');
+  const pd=getPeriodeData();
+  const cies=CFG.compagnies.filter(c=>(pd[c]||[]).length>0);
+  if(!cies.length){ el.innerHTML=`<div class="empty-state"><div class="icon">📊</div><p>Aucune donnée pour ${TRIM} ${ANNEE}.</p></div>`; return; }
+
+  let tot={nb:0,emise:0,enc:0,rev:0,ann:0,ttcEnc:0,commEnc:0,ttcRev:0,commRev:0};
+  const rows=cies.map(c=>{
+    const p=pd[c]||[];
+    const emise=p.length, enc=p.filter(x=>x.statut==='ENCAISSEE'||x.statut==='REVERSEE'), rev=p.filter(x=>x.statut==='REVERSEE'), ann=p.filter(x=>x.statut==='ANNULEE');
+    const ttcEnc=enc.reduce((s,x)=>s+(x.montantEnc||x.ttc),0), commEnc=enc.reduce((s,x)=>s+x.comm,0);
+    const ttcRev=rev.reduce((s,x)=>s+(x.montantRev||x.ttc),0), commRev=rev.reduce((s,x)=>s+x.comm,0);
+    tot.nb+=emise; tot.emise+=emise; tot.enc+=enc.length; tot.rev+=rev.length; tot.ann+=ann.length;
+    tot.ttcEnc+=ttcEnc; tot.commEnc+=commEnc; tot.ttcRev+=ttcRev; tot.commRev+=commRev;
+    return {c, emise, nbEnc:enc.length, nbRev:rev.length, nbAnn:ann.length, ttcEnc, commEnc, ttcRev, commRev};
+  });
+
+  el.innerHTML = `
+    <div class="stats-grid">
+      <div class="stat-card"><div class="sl">Polices émises</div><div class="sv">${tot.emise}</div><div class="ss">${cies.length} compagnie(s)</div></div>
+      <div class="stat-card suc"><div class="sl">Encaissées</div><div class="sv">${tot.enc}</div></div>
+      <div class="stat-card pur"><div class="sl">Reversées</div><div class="sv">${tot.rev}</div></div>
+      <div class="stat-card dan"><div class="sl">Annulées</div><div class="sv">${tot.ann}</div></div>
+      <div class="stat-card acc"><div class="sl">Total TTC Encaissé</div><div class="sv">${fmt(tot.ttcEnc)}</div></div>
+      <div class="stat-card suc"><div class="sl">Revenus PCA (encaissé)</div><div class="sv">${fmt(tot.commEnc)}</div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Récapitulatif par compagnie — ${TRIM} ${ANNEE}
+        <span style="margin-left:auto;" class="no-print"><button class="btn-success btn-sm" onclick="exporterRecapExcel()">⬇️ Exporter tout</button></span>
+      </div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Compagnie</th><th class="num">Émises</th><th class="num">Encaissées</th><th class="num">Reversées</th><th class="num">Annulées</th><th class="num">TTC Encaissé</th><th class="num">Comm. Encaissé</th><th class="num">TTC Reversé</th><th class="num">Comm. Reversé</th></tr></thead>
+        <tbody>${rows.map(r=>`<tr><td><strong>${r.c}</strong></td><td class="num">${r.emise}</td>
+          <td class="num">${r.nbEnc}</td><td class="num">${r.nbRev}</td><td class="num">${r.nbAnn}</td>
+          <td class="num" style="font-weight:700;">${fmt(r.ttcEnc)}</td><td class="num" style="color:var(--pca-success);">${fmt(r.commEnc)}</td>
+          <td class="num">${fmt(r.ttcRev)}</td><td class="num" style="color:var(--pca-purple);">${fmt(r.commRev)}</td></tr>`).join('')}</tbody>
+        <tfoot><tr><td>TOTAL</td><td class="num">${tot.emise}</td><td class="num">${tot.enc}</td><td class="num">${tot.rev}</td><td class="num">${tot.ann}</td>
+          <td class="num">${fmt(tot.ttcEnc)}</td><td class="num">${fmt(tot.commEnc)}</td><td class="num">${fmt(tot.ttcRev)}</td><td class="num">${fmt(tot.commRev)}</td></tr></tfoot>
+      </table></div>
+    </div>`;
+}
+
+function exporterRecapExcel(){
+  const pd=getPeriodeData();
+  const cies=CFG.compagnies.filter(c=>(pd[c]||[]).length>0);
+  if(!cies.length){ alert('Aucune donnée.'); return; }
+  const wb=XLSX.utils.book_new();
+  cies.forEach(c=>{
+    ['EMISSION','ENCAISSEMENT','REVERSEMENT','ANNULATION'].forEach(t=>{
+      const rows=getBdxRows(t,c);
+      if(!rows.length) return;
+      const data=rows.map((p,i)=>({'N°':i+1,'N° POLICE':p.police,'CLIENT':p.assure,'RISQUE':p.branche,'PRIME TTC':Math.round(p.ttc),'COMMISSION':Math.round(p.comm)}));
+      const sheetName=(c+'_'+t).substr(0,31);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), sheetName);
+    });
+  });
+  XLSX.writeFile(wb, `${CABINET}_Recap_${TRIM}_${ANNEE}.xlsx`);
+}
+
+// ===================================================================
+// RAPPORT TRIMESTRIEL — Dépôt Compagnie (Émission+Encaissement+Reversement+Annulation+CC)
+// ===================================================================
+function ouvrirModalRapport(){
+  if(!CIE_CC){ alert("Sélectionne d'abord une compagnie dans l'onglet Compte Courant."); return; }
+  document.getElementById('rapport-cie').value = CIE_CC;
+  document.getElementById('rapport-periode').value = TRIM+' '+ANNEE;
+
+  const polices = getCiePolices(CIE_CC);
+  const nbEmise = polices.length;
+  const nbEnc = getBdxRows('ENCAISSEMENT', CIE_CC).length;
+  const nbRev = getBdxRows('REVERSEMENT', CIE_CC).length;
+  const nbAnn = getBdxRows('ANNULATION', CIE_CC).length;
+
+  const resume = document.getElementById('rapport-resume');
+  resume.innerHTML = `📋 ${nbEmise} police(s) émise(s) · ${nbEnc} encaissée(s) · ${nbRev} reversée(s) · ${nbAnn} annulée(s)`;
+
+  const alertEl = document.getElementById('rapport-alert');
+  if(!nbEmise){
+    alertEl.textContent = "⚠️ Aucune police pour cette compagnie sur cette période — le rapport serait vide.";
+    alertEl.style.display = 'block';
+  } else {
+    alertEl.style.display = 'none';
+  }
+
+  document.getElementById('modal-rapport').classList.add('open');
+}
+
+function genererRapportExcel(){
+  const cie = CIE_CC;
+  const polices = getCiePolices(cie);
+  if(!polices.length){ alert('Aucune donnée à exporter.'); return; }
+
+  const wb = XLSX.utils.book_new();
+
+  // Feuille de garde
+  const garde = [
+    ['RAPPORT TRIMESTRIEL — DÉPÔT COMPAGNIE'],
+    [getCabinetInfo(CABINET).nom+' — '+getCabinetInfo(CABINET).accr],
+    [''],
+    ['Compagnie', cie],
+    ['Période', TRIM+' '+ANNEE],
+    ['Date de génération', new Date().toLocaleDateString('fr-FR')],
+    [''],
+    ['Contenu du rapport :'],
+    ['1. BDX d\'Émission'],
+    ['2. BDX d\'Encaissement'],
+    ['3. BDX de Reversement'],
+    ['4. BDX d\'Annulation'],
+    ['5. Compte Courant (vue Encaissé / vue Reversé)'],
+  ];
+  const wsGarde = XLSX.utils.aoa_to_sheet(garde);
+  wsGarde['!cols'] = [{wch:32},{wch:24}];
+  XLSX.utils.book_append_sheet(wb, wsGarde, '00-Garde');
+
+  // Les 4 BDX
+  const labels = {EMISSION:'1-Emission', ENCAISSEMENT:'2-Encaissement', REVERSEMENT:'3-Reversement', ANNULATION:'4-Annulation'};
+  ['EMISSION','ENCAISSEMENT','REVERSEMENT','ANNULATION'].forEach(t=>{
+    const rows = getBdxRows(t, cie);
+    const data = rows.map((p,i)=>{
+      const base = {'N°':i+1,'N° POLICE':p.police,'RISQUE':p.branche,'CLIENT':p.assure,
+        'DATE SOUSCRIPTION':fmtDate(p.souscription),'DATE EFFET':fmtDate(p.effet),'DATE ECHEANCE':fmtDate(p.echeance),
+        'PRIME NET':Math.round(p.pn),'COUT DE POLICE':Math.round(p.acc),'TAXE':Math.round(p.taxes),
+        'PRIME TTC':Math.round(p.ttc),'COMMISSION':Math.round(p.comm)};
+      if(t==='ENCAISSEMENT'){ base['DATE ENCAISSEMENT']=fmtDate(p.dateEnc); base['MONTANT ENCAISSE']=Math.round(p.montantEnc||0); }
+      if(t==='REVERSEMENT'){ base['DATE REVERSEMENT']=fmtDate(p.dateRev); base['MONTANT REVERSE']=Math.round(p.montantRev||0); }
+      if(t==='ANNULATION'){ base['DATE ANNULATION']=fmtDate(p.dateAnn); }
+      return base;
+    });
+    const ws = data.length ? XLSX.utils.json_to_sheet(data) : XLSX.utils.aoa_to_sheet([['Aucune ligne pour ce bordereau sur la période.']]);
+    XLSX.utils.book_append_sheet(wb, ws, labels[t]);
+  });
+
+  // Compte Courant détaillé
+  const encaissees = polices.filter(p=>p.statut==='ENCAISSEE'||p.statut==='REVERSEE');
+  const reversees = polices.filter(p=>p.statut==='REVERSEE');
+  const totEncTTC = encaissees.reduce((s,p)=>s+(p.montantEnc||p.ttc),0);
+  const totEncComm = encaissees.reduce((s,p)=>s+p.comm,0);
+  const totRevTTC = reversees.reduce((s,p)=>s+(p.montantRev||p.ttc),0);
+  const totRevComm = reversees.reduce((s,p)=>s+p.comm,0);
+
+  const ccData = [
+    ['COMPTE COURANT — '+getCabinetInfo(CABINET).nom+' ↔ '+cie],
+    ['Période : '+TRIM+' '+ANNEE],[''],
+    ['VUE ENCAISSÉ ('+encaissees.length+' police(s))'],
+    ['Primes TTC encaissées', Math.round(totEncTTC)],
+    ['Commission (base+bonus)', Math.round(totEncComm)],
+    ['NET DÛ À LA COMPAGNIE', Math.round(totEncTTC-totEncComm)],[''],
+    ['VUE REVERSÉ ('+reversees.length+' police(s))'],
+    ['Primes TTC reversées', Math.round(totRevTTC)],
+    ['Commission (base+bonus)', Math.round(totRevComm)],
+    ['NET DÉJÀ REVERSÉ', Math.round(totRevTTC-totRevComm)],[''],
+    ['EN TRANSIT (encaissé non reversé)', Math.round(totEncTTC-totRevTTC)],[''],[''],
+    ['VALIDATION CONTRADICTOIRE (Art. 559 Code CIMA)'],[''],
+    ['Établi par PCA — Nom :','______________________'],
+    ['Date :','___/___/______','Signature :','______________________'],[''],
+    ['Visa Compagnie — Nom :','______________________'],
+    ['Date :','___/___/______','Signature :','______________________'],[''],
+    ['Réserves / Observations :'],
+    [''],[''],
+  ];
+  const wsCC = XLSX.utils.aoa_to_sheet(ccData);
+  wsCC['!cols'] = [{wch:32},{wch:18},{wch:14},{wch:22}];
+  XLSX.utils.book_append_sheet(wb, wsCC, '5-CompteCourant');
+
+  XLSX.writeFile(wb, `${CABINET}_Rapport_Trimestriel_${cie}_${TRIM}_${ANNEE}.xlsx`);
+}
+
+function genererRapportPDF(){
+  const cie = CIE_CC;
+  const polices = getCiePolices(cie);
+  if(!polices.length){ alert('Aucune donnée pour générer le rapport.'); return; }
+
+  const dateGen = new Date().toLocaleDateString('fr-FR');
+
+  function entete(titreSection){
+    return `<div class="rapport-entete">
+      <h1>RAPPORT TRIMESTRIEL — ${titreSection}</h1>
+      <p>${getCabinetInfo(CABINET).nom} — ${getCabinetInfo(CABINET).accr} &nbsp;|&nbsp; Compagnie : <strong>${cie}</strong> &nbsp;|&nbsp; Période : <strong>${TRIM} ${ANNEE}</strong> &nbsp;|&nbsp; Généré le ${dateGen}</p>
+    </div>`;
+  }
+
+  function tableBdx(type){
+    const rows = getBdxRows(type, cie);
+    const titres = {EMISSION:"BDX D'ÉMISSION", ENCAISSEMENT:"BDX D'ENCAISSEMENT", REVERSEMENT:"BDX DE REVERSEMENT", ANNULATION:"BDX D'ANNULATION"};
+    let extraTh = '', extraTd = (p)=>'';
+    if(type==='ENCAISSEMENT'){ extraTh='<th>Date Enc.</th><th class="num">Montant Enc.</th>'; extraTd=(p)=>`<td>${fmtDate(p.dateEnc)}</td><td class="num">${fmt(p.montantEnc)}</td>`; }
+    if(type==='REVERSEMENT'){ extraTh='<th>Date Rev.</th><th class="num">Montant Rev.</th>'; extraTd=(p)=>`<td>${fmtDate(p.dateRev)}</td><td class="num">${fmt(p.montantRev)}</td>`; }
+    if(type==='ANNULATION'){ extraTh='<th>Date Annulation</th>'; extraTd=(p)=>`<td>${fmtDate(p.dateAnn)}</td>`; }
+
+    if(!rows.length){
+      return `<div class="rapport-page rapport-page-break">${entete(titres[type])}
+        <div class="rapport-section-titre">${titres[type]}</div>
+        <p style="color:#888;font-style:italic;">Aucune ligne pour ce bordereau sur la période.</p></div>`;
+    }
+
+    const totPN=rows.reduce((s,p)=>s+p.pn,0), totAcc=rows.reduce((s,p)=>s+p.acc,0),
+          totTax=rows.reduce((s,p)=>s+p.taxes,0), totTTC=rows.reduce((s,p)=>s+p.ttc,0), totComm=rows.reduce((s,p)=>s+p.comm,0);
+    let totExtra = '';
+    if(type==='ENCAISSEMENT'){ const tm=rows.reduce((s,p)=>s+(p.montantEnc||0),0); totExtra=`<td></td><td class="num">${fmt(tm)}</td>`; }
+    if(type==='REVERSEMENT'){ const tm=rows.reduce((s,p)=>s+(p.montantRev||0),0); totExtra=`<td></td><td class="num">${fmt(tm)}</td>`; }
+    if(type==='ANNULATION'){ totExtra='<td></td>'; }
+
+    return `<div class="rapport-page rapport-page-break">${entete(titres[type])}
+      <div class="rapport-section-titre">${titres[type]} — ${rows.length} ligne(s)</div>
+      <table class="rapport-table">
+        <thead><tr><th>N°</th><th>N° Police</th><th>Risque</th><th>Client</th><th>Date Effet</th><th>Date Échéance</th>
+        <th class="num">Prime Net</th><th class="num">Coût Police</th><th class="num">Taxe</th><th class="num">Prime TTC</th><th class="num">Commission</th>${extraTh}</tr></thead>
+        <tbody>${rows.map((p,i)=>`<tr><td>${i+1}</td><td>${p.police}</td><td>${p.branche}</td><td>${p.assure}</td>
+          <td>${fmtDate(p.effet)}</td><td>${fmtDate(p.echeance)}</td>
+          <td class="num">${fmt(p.pn)}</td><td class="num">${fmt(p.acc)}</td><td class="num">${fmt(p.taxes)}</td>
+          <td class="num">${fmt(p.ttc)}</td><td class="num">${fmt(p.comm)}</td>${extraTd(p)}</tr>`).join('')}</tbody>
+        <tfoot><tr><td colspan="6">TOTAUX</td><td class="num">${fmt(totPN)}</td><td class="num">${fmt(totAcc)}</td>
+        <td class="num">${fmt(totTax)}</td><td class="num">${fmt(totTTC)}</td><td class="num">${fmt(totComm)}</td>${totExtra}</tr></tfoot>
+      </table>
+    </div>`;
+  }
+
+  // Page Compte Courant + bloc signature CIMA
+  const encaissees = polices.filter(p=>p.statut==='ENCAISSEE'||p.statut==='REVERSEE');
+  const reversees = polices.filter(p=>p.statut==='REVERSEE');
+  const annulees = polices.filter(p=>p.statut==='ANNULEE');
+  const totEncTTC = encaissees.reduce((s,p)=>s+(p.montantEnc||p.ttc),0);
+  const totEncComm = encaissees.reduce((s,p)=>s+p.comm,0);
+  const totRevTTC = reversees.reduce((s,p)=>s+(p.montantRev||p.ttc),0);
+  const totRevComm = reversees.reduce((s,p)=>s+p.comm,0);
+  const enTransit = totEncTTC - totRevTTC;
+
+  const pageCC = `<div class="rapport-page rapport-page-break">${entete('COMPTE COURANT')}
+    <div class="rapport-section-titre">Compte Courant — ${polices.length} police(s) au total, dont ${annulees.length} annulée(s)</div>
+
+    <div class="rapport-cc-block">
+      <div class="rapport-cc-row" style="background:#27ae60;color:#fff;font-weight:700;">VUE ENCAISSÉ (${encaissees.length} police(s))</div>
+      <div class="rapport-cc-row"><span>Primes TTC encaissées</span><span>${fmt(totEncTTC)}</span></div>
+      <div class="rapport-cc-row"><span>Commission (base+bonus)</span><span>${fmt(totEncComm)}</span></div>
+      <div class="rapport-cc-row total"><span>NET DÛ À ${cie}</span><span>${fmt(totEncTTC-totEncComm)}</span></div>
+    </div>
+
+    <div class="rapport-cc-block">
+      <div class="rapport-cc-row" style="background:#7d3c98;color:#fff;font-weight:700;">VUE REVERSÉ (${reversees.length} police(s))</div>
+      <div class="rapport-cc-row"><span>Primes TTC reversées</span><span>${fmt(totRevTTC)}</span></div>
+      <div class="rapport-cc-row"><span>Commission (base+bonus)</span><span>${fmt(totRevComm)}</span></div>
+      <div class="rapport-cc-row total"><span>NET DÉJÀ REVERSÉ</span><span>${fmt(totRevTTC-totRevComm)}</span></div>
+    </div>
+
+    <div class="rapport-cc-block">
+      <div class="rapport-cc-row solde"><span>${enTransit>=0?'EN TRANSIT — Encaissé non reversé':'ANOMALIE — Reversé > Encaissé'}</span><span>${fmt(Math.abs(enTransit))}</span></div>
+    </div>
+
+    <p style="font-size:.82em;font-weight:700;color:#1a3a5c;margin:14px 0 6px;">Ventilation mensuelle (tenue mensuelle — Art. 559 Code CIMA)</p>
+    <table class="rapport-table">${(()=>{
+      const t = tableParMois(encaissees, TRIM, ANNEE);
+      // tableParMois() renvoie un <table>...</table> complet avec une éventuelle note en dehors ;
+      // ici on ne garde que le contenu de la table pour l'insérer dans le conteneur .rapport-table du PDF.
+      const m = t.match(/<table>([\s\S]*?)<\/table>/);
+      return m ? m[1] : '';
+    })()}</table>
+
+    <div class="rapport-signature">
+      <div class="rapport-signature-block">
+        <h4>Établi par ${getCabinetInfo(CABINET).nom}</h4>
+        <div class="rapport-signature-line">Nom : <span class="ligne"></span></div>
+        <div class="rapport-signature-line">Date : <span class="ligne" style="min-width:90px;"></span></div>
+        <div class="rapport-signature-line">Signature :</div>
+      </div>
+      <div class="rapport-signature-block">
+        <h4>Visa ${cie} (validation contradictoire)</h4>
+        <div class="rapport-signature-line">Nom : <span class="ligne"></span></div>
+        <div class="rapport-signature-line">Date : <span class="ligne" style="min-width:90px;"></span></div>
+        <div class="rapport-signature-line">Signature :</div>
+      </div>
+    </div>
+
+    <div class="rapport-reserves">
+      <h4>Réserves / Observations (Art. 559 Code CIMA — en cas de désaccord)</h4>
+      <div class="zone-vide"></div>
+      <div class="zone-vide"></div>
+    </div>
+
+    <p class="rapport-footer-note">Document établi conformément à l'Article 559 du Code CIMA — transmission à l'autorité de tutelle dans un délai maximum de 30 jours à compter de la fin du trimestre.</p>
+  </div>`;
+
+  const html = tableBdx('EMISSION') + tableBdx('ENCAISSEMENT') + tableBdx('REVERSEMENT') + tableBdx('ANNULATION') + pageCC;
+
+  document.getElementById('zone-impression-rapport').innerHTML = html;
+  fermerModal('modal-rapport');
+  document.body.classList.add('mode-impression-rapport');
+
+  setTimeout(()=>{
+    window.print();
+    document.body.classList.remove('mode-impression-rapport');
+  }, 200);
+}
+
+// ===================================================================
+// HISTORIQUE
+// ===================================================================
+function ouvrirHistorique(){
+  const el=document.getElementById('historique-content');
+  document.getElementById('historique-cabinet-label').textContent = getCabinetInfo(CABINET).nom;
+  const cleActuelle=periodeKey(TRIM,ANNEE);
+  const periodes=Object.keys(DATA).sort().reverse();
+  if(!periodes.length){ el.innerHTML=`<div class="empty-state"><div class="icon">🕐</div><p>Aucun historique.</p></div>`; }
+  else {
+    el.innerHTML=`<div class="histo-grid">`+periodes.map(k=>{
+      const pd=DATA[k]||{};
+      const cies=Object.keys(pd).filter(c=>(pd[c]||[]).length>0);
+      const totPolices=cies.reduce((s,c)=>s+(pd[c]||[]).length,0);
+      const isCurrent=k===cleActuelle;
+      return `<div class="histo-card ${isCurrent?'current':''}" onclick="allerPeriode('${k}')">
+        <div class="hc-periode">${k.replace('-',' · ')} ${isCurrent?'<span class="badge badge-warning" style="font-size:.62em;">actuel</span>':''}</div>
+        <div class="hc-meta">${cies.length} compagnie(s)</div>
+        <div class="hc-stats">${totPolices} police(s)</div></div>`;
+    }).join('')+`</div>`;
+  }
+  document.getElementById('modal-historique').classList.add('open');
+}
+function allerPeriode(k){
+  const [trim,annee]=k.split('-');
+  document.getElementById('sel-trim').value=trim;
+  document.getElementById('sel-annee').value=annee;
+  TRIM=trim; ANNEE=parseInt(annee);
+  fermerModal('modal-historique');
+  changerPeriode();
+}
+
+// ===================================================================
+// SAUVEGARDE JSON
+// ===================================================================
+function exporterJSON(){
+  // La sauvegarde JSON couvre TOUJOURS les deux cabinets (PCA et Elite Assurances),
+  // pour qu'une restauration ne puisse jamais faire perdre les données de l'autre cabinet.
+  const backup={version:'2.1',date:new Date().toISOString(),source:'BDX Cycle Complet & Compte Courant — multi-cabinet',config:CFG_ALL,data:DATA_ALL};
+  const blob=new Blob([JSON.stringify(backup,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a'); a.href=url; a.download=`Sauvegarde_TousCabinets_${new Date().toISOString().slice(0,10)}.json`; a.click();
+  URL.revokeObjectURL(url);
+}
+function exporterToutExcel(){
+  // Exporte uniquement le cabinet actif (CABINET), pour rester cohérent avec ce que l'utilisateur regarde à l'écran.
+  const periodes=Object.keys(DATA);
+  if(!periodes.length){ alert('Aucune donnée pour ce cabinet.'); return; }
+  const wb=XLSX.utils.book_new();
+  periodes.forEach(k=>{
+    const pd=DATA[k];
+    Object.keys(pd).forEach(c=>{
+      const polices=pd[c]||[];
+      if(!polices.length) return;
+      const data=polices.map((p,i)=>({'N°':i+1,'N° POLICE':p.police,'CLIENT':p.assure,'RISQUE':p.branche,
+        'PRIME TTC':Math.round(p.ttc),'COMMISSION':Math.round(p.comm),'STATUT':STATUT_LABELS[p.statut]}));
+      const sheetName=(k+'_'+c).replace(/[:\\\/\?\*\[\]]/g,'').substr(0,31);
+      XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(data), sheetName);
+    });
+  });
+  XLSX.writeFile(wb, `${CABINET}_Export_Complet_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+function restaurerJSON(e){
+  const file=e.target.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=ev=>{
+    try{
+      const backup=JSON.parse(ev.target.result);
+      if(!backup.data||!backup.config) throw new Error('Format invalide.');
+      // Compatible avec l'ancien format mono-cabinet (v2.0, clé = periodeKey directement)
+      // et le nouveau format multi-cabinet (v2.1, clé = cabinet).
+      const estAncienFormat = backup.config.compagnies !== undefined;
+      if(!confirm(`Restaurer la sauvegarde du ${backup.date?new Date(backup.date).toLocaleDateString('fr-FR'):'?'} ?\n⚠️ Remplace toutes les données actuelles ${estAncienFormat?'du cabinet '+getCabinetInfo(CABINET).nom:'des deux cabinets'}.`)) return;
+      if(estAncienFormat){
+        CFG_ALL[CABINET] = backup.config;
+        DATA_ALL[CABINET] = backup.data;
+      } else {
+        CFG_ALL = backup.config;
+        DATA_ALL = backup.data;
+        if(!CFG_ALL.PCA) CFG_ALL.PCA = { compagnies:['2ACI','GNA','COMAR'] };
+        if(!CFG_ALL.ELITE) CFG_ALL.ELITE = { compagnies:['2ACI','GNA','COMAR'] };
+        if(!DATA_ALL.PCA) DATA_ALL.PCA = {};
+        if(!DATA_ALL.ELITE) DATA_ALL.ELITE = {};
+      }
+      appliquerVueCabinet();
+      sauvegarder(); renderCieCheckboxes(); afficherCieTabs(); changerPeriode();
+      const m=document.getElementById('restore-msg'); m.className='alert alert-success'; m.textContent='✓ Restauré.'; m.style.display='block';
+    }catch(ex){
+      const m=document.getElementById('restore-msg'); m.className='alert alert-danger'; m.textContent='✗ Erreur : '+ex.message; m.style.display='block';
+    }
+  };
+  reader.readAsText(file); e.target.value='';
+}
+function majStockageInfo(){
+  const cabActifEl = document.getElementById('sauvegarde-cabinet-actif');
+  if(cabActifEl) cabActifEl.textContent = getCabinetInfo(CABINET).nom;
+  const periodes=Object.keys(DATA);
+  let totalPolices=0;
+  periodes.forEach(k=>{ const pd=DATA[k]; Object.keys(pd).forEach(c=>{ totalPolices+=(pd[c]||[]).length; }); });
+  const jsonSize=JSON.stringify(DATA_ALL).length;
+  document.getElementById('stockage-info').innerHTML=`
+    <div class="stats-grid">
+      <div class="stat-card"><div class="sl">Trimestres stockés (${getCabinetInfo(CABINET).nom})</div><div class="sv">${periodes.length}</div></div>
+      <div class="stat-card acc"><div class="sl">Total polices</div><div class="sv">${totalPolices}</div></div>
+      <div class="stat-card suc"><div class="sl">Taille stockage</div><div class="sv">${(jsonSize/1024).toFixed(1)} Ko</div></div>
+    </div>
+    <p class="text-muted" style="margin-top:4px;">Périodes : ${periodes.sort().map(k=>`<strong>${k.replace('-',' · ')}</strong>`).join(' · ')||'—'}</p>`;
+}
+
+// ===================================================================
+// NAVIGATION
+// ===================================================================
+function showTab(id,btn){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tabs-bar .tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if(btn) btn.classList.add('active');
+  if(id==='polices') renderPolices();
+  if(id==='bdx') renderBDX();
+  if(id==='cc') renderCC();
+  if(id==='recap') renderRecap();
+  if(id==='sauvegarde') majStockageInfo();
+}
+function fermerModal(id){ document.getElementById(id).classList.remove('open'); }
+document.addEventListener('click', e=>{ if(e.target.classList.contains('modal-overlay')) fermerModal(e.target.id); });
+
+// ===================================================================
+// FIREBASE — AUTHENTIFICATION & SYNCHRONISATION PARTAGÉE
+// ===================================================================
+// Même projet Firebase que les autres applications PCA (BDX Règlement,
+// Facturation GNA) : "premium-bdx-app". Authentification par email/mot de
+// passe (Firebase Auth classique), données partagées en lecture/écriture
+// pour tous les utilisateurs connectés (Gaston, Macoty, Anini...).
+const FIREBASE_CONFIG = {
+  apiKey: "AIzaSyDrZqaNt_nKHZpi6jgaoETEVqz0oRFeIx0",
+  authDomain: "premium-bdx-app.firebaseapp.com",
+  databaseURL: "https://premium-bdx-app-default-rtdb.europe-west1.firebasedatabase.app",
+  projectId: "premium-bdx-app",
+  storageBucket: "premium-bdx-app.appspot.com"
+};
+
+const CHEMIN_PARTAGE = 'bdxCompteCourant/partage'; // racine de stockage partagé dans Realtime Database
+
+let firebaseApp = null;
+let firebaseDb = null;
+let firebaseAuth = null;
+let utilisateurConnecte = null;
+let firebasePret = false;
+let ecritureEnCoursDepuisFirebase = false; // évite les boucles d'écriture en retour
+
+function initFirebase(){
+  if(typeof firebase === 'undefined'){
+    // Le SDK Firebase n'a pas pu se charger (pas de réseau, ou blocage du navigateur
+    // comme pour SheetJS — cf. bandeau rouge équivalent plus haut dans ce fichier).
+    document.getElementById('login-statut').innerHTML =
+      "⚠️ Connexion au serveur partagé indisponible.<br>Vérifie ta connexion internet, ou que ce fichier n'est pas bloqué par Windows (clic droit → Propriétés → Débloquer).";
+    return;
+  }
+  try{
+    firebaseApp = firebase.initializeApp(FIREBASE_CONFIG);
+    firebaseDb = firebase.database();
+    firebaseAuth = firebase.auth();
+    firebasePret = true;
+  }catch(e){
+    console.error('Firebase indisponible :', e);
+    document.getElementById('login-statut').textContent = "⚠️ Connexion au serveur partagé indisponible — vérifie ta connexion internet.";
+    return;
+  }
+
+  firebaseAuth.onAuthStateChanged(user => {
+    if(user){
+      utilisateurConnecte = user.email;
+      document.getElementById('ecran-connexion').style.display = 'none';
+      document.getElementById('app-content').style.display = 'block';
+      document.getElementById('utilisateur-connecte-label').textContent = utilisateurConnecte.split('@')[0];
+      demarrerSyncFirebase();
+      init();
+    } else {
+      utilisateurConnecte = null;
+      document.getElementById('ecran-connexion').style.display = 'flex';
+      document.getElementById('app-content').style.display = 'none';
+    }
+  });
+}
+
+function seConnecter(){
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-password').value;
+  const alertEl = document.getElementById('login-alert');
+  alertEl.style.display = 'none';
+  if(!email || !pass){
+    alertEl.textContent = 'Email et mot de passe requis.';
+    alertEl.style.display = 'block';
+    return;
+  }
+  if(!firebasePret){
+    alertEl.textContent = "Connexion au serveur indisponible. Réessaie dans quelques instants.";
+    alertEl.style.display = 'block';
+    return;
+  }
+  document.getElementById('login-statut').textContent = 'Connexion en cours...';
+  firebaseAuth.signInWithEmailAndPassword(email, pass)
+    .catch(err => {
+      document.getElementById('login-statut').textContent = '';
+      alertEl.textContent = err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found'
+        ? '✗ Email ou mot de passe incorrect.'
+        : '✗ Erreur de connexion : ' + err.message;
+      alertEl.style.display = 'block';
+    });
+}
+
+function seDeconnecter(){
+  if(!confirm('Se déconnecter ?')) return;
+  if(syncRef) syncRef.off();
+  firebaseAuth.signOut();
+}
+
+// Synchronisation temps réel : Firebase est la source de vérité partagée.
+// localStorage reste un cache local (lecture instantanée à l'ouverture, et
+// filet de secours si la connexion internet est momentanément coupée).
+let syncRef = null;
+function demarrerSyncFirebase(){
+  if(!firebaseDb) return;
+  syncRef = firebaseDb.ref(CHEMIN_PARTAGE);
+  let premierePassage = true;
+  const badgeSync = document.getElementById('badge-sync');
+  syncRef.on('value', snapshot => {
+    const distant = snapshot.val();
+    if(!distant){
+      // Rien sur le serveur partagé : on amorce avec l'état local actuel (cache du navigateur),
+      // pour ne pas perdre une saisie déjà faite avant la mise en place du partage Firebase.
+      if(premierePassage) pousserVersFirebase();
+      premierePassage = false;
+      if(badgeSync) badgeSync.textContent = '✓ Synchronisé';
+      return;
+    }
+    premierePassage = false;
+    ecritureEnCoursDepuisFirebase = true;
+    if(distant.config) CFG_ALL = distant.config;
+    if(distant.data) DATA_ALL = distant.data;
+    if(!CFG_ALL.PCA) CFG_ALL.PCA = { compagnies:['2ACI','GNA','COMAR'] };
+    if(!CFG_ALL.ELITE) CFG_ALL.ELITE = { compagnies:['2ACI','GNA','COMAR'] };
+    if(!DATA_ALL.PCA) DATA_ALL.PCA = {};
+    if(!DATA_ALL.ELITE) DATA_ALL.ELITE = {};
+    appliquerVueCabinet();
+    // Sauvegarde locale silencieuse (cache hors-ligne), sans redéclencher d'envoi vers Firebase
+    try{
+      localStorage.setItem(KEY_CONFIG, JSON.stringify(CFG_ALL));
+      localStorage.setItem(KEY_DATA, JSON.stringify(DATA_ALL));
+    }catch(e){}
+    renderCieCheckboxes(); renderPolices(); renderBDX(); renderCC(); renderRecap(); majStockageInfo();
+    ecritureEnCoursDepuisFirebase = false;
+    const qui = distant.derniereMaj ? ` (maj par ${distant.derniereMaj.par.split('@')[0]})` : '';
+    if(badgeSync) badgeSync.textContent = '✓ Synchronisé' + qui;
+  }, err => {
+    console.error('Erreur de synchronisation Firebase :', err);
+    document.getElementById('login-statut').textContent = '';
+    if(badgeSync) badgeSync.textContent = '⚠️ Hors ligne (cache local)';
+  });
+}
+
+// Pousse l'état local courant vers Firebase pour que tous les utilisateurs connectés
+// le reçoivent en temps réel via syncRef.on('value', ...) ci-dessus.
+function pousserVersFirebase(){
+  if(!firebaseDb || !utilisateurConnecte || ecritureEnCoursDepuisFirebase) return;
+  firebaseDb.ref(CHEMIN_PARTAGE).set({
+    config: CFG_ALL,
+    data: DATA_ALL,
+    derniereMaj: { par: utilisateurConnecte, le: new Date().toISOString() }
+  }).catch(e => {
+    console.error('Échec de synchronisation Firebase :', e);
+  });
+}
+
+// ===================================================================
+// INIT
+// ===================================================================
+function init(){
+  charger();
+  document.getElementById('sel-cabinet').value = CABINET;
+  document.body.classList.add('cabinet-'+CABINET);
+  const info = getCabinetInfo(CABINET);
+  document.getElementById('header-logo').textContent = CABINET==='PCA' ? 'PCA' : 'ELITE';
+  document.getElementById('header-cabinet-sub').textContent = info.nom + ' — ' + info.accr;
+  document.getElementById('sel-trim').value=TRIM;
+  document.getElementById('sel-annee').value=ANNEE;
+  document.getElementById('display-date').textContent=new Date().toLocaleDateString('fr-FR');
+  document.getElementById('periode-badge').textContent=TRIM+' · '+ANNEE;
+  document.getElementById('display-periode').textContent=TRIM+' · '+ANNEE;
+  renderCieCheckboxes(); renderTauxTable(); afficherCieTabs();
+  renderPolices(); renderBDX();
+  majStockageInfo();
+  majBadgeDelaiCima();
+}
+// init() est désormais appelée après authentification réussie (voir initFirebase ci-dessus),
+// pas au chargement de la page — l'app reste cachée derrière l'écran de connexion jusque-là.
+initFirebase();
+</script>
+</div>
+</body>
+</html>
