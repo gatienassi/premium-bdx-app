@@ -12,6 +12,7 @@
     --pca-light:     #ecf0f1;
     --pca-dark:      #2c3e50;
     --pca-white:     #ffffff;
+    --pca-purple:    #7d3c98;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -73,6 +74,7 @@
     box-shadow: 0 14px 32px rgba(26, 58, 92, 0.2);
   }
   .app-card.gna { border-top-color: var(--pca-accent); }
+  .app-card.cc { border-top-color: var(--pca-purple); }
 
   .app-icon {
     width: 48px;
@@ -86,6 +88,7 @@
   }
   .app-card.bdx .app-icon { color: var(--pca-secondary); }
   .app-card.gna .app-icon { color: var(--pca-accent); }
+  .app-card.cc .app-icon { color: var(--pca-purple); }
 
   .app-card h2 { font-size: 1.2em; color: var(--pca-primary); }
   .app-card p { font-size: 0.9em; color: #5b6b78; line-height: 1.5; }
@@ -97,6 +100,7 @@
     color: var(--pca-secondary);
   }
   .app-card.gna .app-cta { color: var(--pca-accent); }
+  .app-card.cc .app-cta { color: var(--pca-purple); }
 
   footer {
     text-align: center;
@@ -128,6 +132,13 @@
         <div class="app-icon">⚓</div>
         <h2>Facturation GNA Certificats Maritimes</h2>
         <p>Import du fichier GUCE, calcul automatique des primes et avoirs, génération des factures clients PDF.</p>
+        <span class="app-cta">Ouvrir l'application →</span>
+      </a>
+
+      <a class="app-card cc" href="BDX_COMPTE_COURANT_v3.html">
+        <div class="app-icon">💰</div>
+        <h2>BDX Compte Courant</h2>
+        <p>Bordereaux d'émission, encaissement, reversement et annulation, calcul du compte courant et génération du rapport trimestriel CIMA — Premium Courtage Assur &amp; Elite Assurances.</p>
         <span class="app-cta">Ouvrir l'application →</span>
       </a>
 
