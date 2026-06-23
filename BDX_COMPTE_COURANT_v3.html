@@ -356,7 +356,7 @@ body.mode-impression-rapport #zone-impression-rapport{ display:block!important; 
         <tbody id="taux-table"></tbody>
       </table>
     </div>
-    <p class="text-muted" style="margin-top:6px;">⚠️ MALADIE : Bonus = 0%. PVT + NSIA : commission 27%. La colonne <strong>COMMISSION</strong> dans les BDX = Commission base + Bonus, déjà additionnés (comme dans vos fichiers GNA).</p>
+    <p class="text-muted" style="margin-top:6px;">⚠️ MALADIE : Bonus = 0%. VOYAGE : Commission base = 10%, Bonus = 0% (toutes compagnies). PVT + NSIA : commission 27%. La colonne <strong>COMMISSION</strong> dans les BDX = Commission base + Bonus, déjà additionnés (comme dans vos fichiers GNA).</p>
   </div>
 </div>
 
@@ -388,7 +388,7 @@ body.mode-impression-rapport #zone-impression-rapport{ display:block!important; 
       <input type="file" id="import-file" accept=".xlsx,.xls" onchange="importerExcel(event)">
       <div style="font-size:1.8em;">📥</div>
       <p style="font-weight:600;margin-top:4px;">Importer le fichier des polices émises</p>
-      <p class="text-muted">Colonnes reconnues : NUMERO DE POLICE · RISQUE (branche) · CLIENT · DATE SOUSCRIPTION · DATE EFFET · DATE ECHEANCE · PRIME NET · COUT DE POLICE/ACCESSOIRES · TAXE · PRIME TTC · COMMISSION</p>
+      <p class="text-muted">Colonnes reconnues : CABINET (optionnel, filtre auto selon le cabinet actif) · NUMERO DE POLICE · RISQUE (branche) · CLIENT · DATE SOUSCRIPTION · DATE EFFET · DATE ECHEANCE · PRIME NET · COUT DE POLICE/ACCESSOIRES · TAXE · PRIME TTC · COMMISSION</p>
     </div>
     <div id="import-msg" class="alert" style="display:none;margin-top:8px;"></div>
   </div>
@@ -532,7 +532,7 @@ body.mode-impression-rapport #zone-impression-rapport{ display:block!important; 
           <option value="">-- Choisir --</option>
           <option>AUTO</option><option>MRP</option><option>RC</option><option>MRH</option>
           <option>IA</option><option>TRC</option><option>CAUTION</option><option>MTT</option>
-          <option>MALADIE</option><option>BATEAU</option><option>PVT</option><option>TRM</option><option>MARITIME</option>
+          <option>MALADIE</option><option>BATEAU</option><option>PVT</option><option>TRM</option><option>MARITIME</option><option>VOYAGE</option>
         </select>
       </div>
       <div class="form-group"><label>Date Souscription</label><input type="date" id="s-souscription"></div>
@@ -659,7 +659,7 @@ body.mode-impression-rapport #zone-impression-rapport{ display:block!important; 
 // ===================================================================
 const COMPAGNIES_DISPO = ['2ACI','GNA','COMAR','NSIA','SANLAM','ALLIANZ','AXA','AMSA','ATLANTA','CORIS','SCHIBA','SUNU','SANLAM-ALLIANZ'];
 
-const TX_COMM = { AUTO:20, MRP:27, RC:23, MRH:27, IA:24, TRC:18, CAUTION:10, MTT:21, MALADIE:10, BATEAU:20, PVT:25, TRM:25, MARITIME:20 };
+const TX_COMM = { AUTO:20, MRP:27, RC:23, MRH:27, IA:24, TRC:18, CAUTION:10, MTT:21, MALADIE:10, BATEAU:20, PVT:25, TRM:25, MARITIME:20, VOYAGE:10 };
 const TX_BONUS = { '2ACI':7, GNA:5, COMAR:7.5, NSIA:5, SANLAM:3, ALLIANZ:0, AXA:0, AMSA:0, ATLANTA:0, CORIS:0, SCHIBA:0, SUNU:0, 'SANLAM-ALLIANZ':0 };
 
 // Variantes orthographiques rencontrées dans les fichiers réels des compagnies
@@ -672,7 +672,7 @@ const ALIAS_BRANCHE = {
   'RESPONSABILITE CIVILE':'RC', 'TOUS RISQUES CHANTIER':'TRC',
   'TRANSPORT MARCHANDISES':'TRM', 'MARCHANDISES TRANSPORTEES':'MTT',
   'INDIVIDUELLE ACCIDENT':'IA', 'ACCIDENTS':'IA',
-  'BATEAUX':'BATEAU', 'VOYAGE':'PVT', 'PROTECTION VOYAGE':'PVT'
+  'BATEAUX':'BATEAU', 'PROTECTION VOYAGE':'VOYAGE'
 };
 
 // Normalise une branche en tentant d'abord une correspondance exacte, puis les alias connus.
@@ -684,7 +684,7 @@ function normaliserBranche(brancheBrute){
 }
 
 function getTxC(branche, cie) { if (branche==='PVT' && cie==='NSIA') return 27; return TX_COMM[branche]; }
-function getTxB(branche, cie) { if (branche==='MALADIE') return 0; return TX_BONUS[cie] || 0; }
+function getTxB(branche, cie) { if (branche==='MALADIE'||branche==='VOYAGE') return 0; return TX_BONUS[cie] || 0; }
 // Taux de secours utilisé UNIQUEMENT pour ne pas bloquer le calcul d'affichage,
 // jamais pour masquer un problème : toute branche non reconnue doit être signalée
 // à l'utilisateur via normaliserBranche() avant d'arriver ici.
@@ -1091,13 +1091,30 @@ function importerExcel(e){
       const useRows = XLSX.utils.sheet_to_json(ws,{defval:'', range: headerIdx});
 
       const polices = getCiePolices(CIE_POL);
-      let nb=0, doublons=0, err=0;
+      let nb=0, doublons=0, err=0, ignoreesAutreCabinet=0;
       const branchesNonReconnues = new Set();
+      const cabinetActifInfo = getCabinetInfo(CABINET);
+      // Variantes acceptées pour reconnaître le cabinet actif dans la colonne CABINET du fichier,
+      // qu'elle contienne le nom complet ("Premium Courtage Assur") ou le code court ("PCA").
+      const alias_cabinet = CABINET==='PCA'
+        ? ['PCA','PREMIUM COURTAGE ASSUR','PREMIUM']
+        : ['ELITE','ELITE ASSURANCES'];
 
       useRows.forEach(row=>{
         // Construire une version normalisée des clés de la ligne pour un matching robuste
         const rowNorm = {};
         Object.keys(row).forEach(k => { rowNorm[normaliserEntete(k)] = row[k]; });
+
+        // Filtre multi-cabinet : si le fichier contient une colonne CABINET, on ne retient
+        // QUE les lignes correspondant au cabinet actuellement sélectionné dans l'app. Si la
+        // colonne est absente du fichier (ancien modèle mono-cabinet), on importe tout, comme avant.
+        const cabiniteRaw = getChamp(rowNorm, ['CABINET']).toString().trim().toUpperCase();
+        const colonneCabinetPresente = Object.keys(rowNorm).some(k => k.includes('CABINET'));
+        if(colonneCabinetPresente){
+          if(!cabiniteRaw){ err++; return; } // colonne présente mais cellule vide sur cette ligne : on ne devine pas, on ignore
+          const correspond = alias_cabinet.some(a => normaliserEntete(cabiniteRaw)===normaliserEntete(a));
+          if(!correspond){ ignoreesAutreCabinet++; return; }
+        }
 
         const police = getChamp(rowNorm, ['NUMERO DE POLICE','N° POLICE','N POLICE','NUMERO POLICE','POLICE']).toString().trim().toUpperCase();
         const assure = getChamp(rowNorm, ['CLIENT','NOM ASSURE','ASSURE','CLIENT ASSURE']).toString().trim();
@@ -1131,14 +1148,18 @@ function importerExcel(e){
       sauvegarder();
       renderPolices(); renderBDX(); renderRecap(); majStockageInfo();
       const m=document.getElementById('import-msg');
-      if(nb===0){
+      if(nb===0 && ignoreesAutreCabinet===0){
         m.className='alert alert-danger';
         m.innerHTML = `✗ Aucune police importée. ${err} ligne(s) rejetée(s) — vérifie que les colonnes <strong>N° Police</strong> et <strong>Prime Nette</strong> sont bien renseignées.`;
+      } else if(nb===0 && ignoreesAutreCabinet>0){
+        m.className='alert alert-warning';
+        m.innerHTML = `⚠️ Aucune ligne pour <strong>${cabinetActifInfo.nom}</strong> dans ce fichier. ${ignoreesAutreCabinet} ligne(s) appartenaient à l'autre cabinet (ignorée(s) automatiquement). Vérifie que tu as bien sélectionné le bon cabinet en haut de l'app, ou que la colonne CABINET du fichier est correctement renseignée.`;
       } else {
         m.className = branchesNonReconnues.size>0 ? 'alert alert-warning' : 'alert alert-success';
-        m.innerHTML = `✓ <strong>${nb}</strong> police(s) importée(s) (statut Émise).` +
+        m.innerHTML = `✓ <strong>${nb}</strong> police(s) importée(s) pour <strong>${cabinetActifInfo.nom}</strong> (statut Émise).` +
+          (ignoreesAutreCabinet>0?` <span class="doublon-badge" style="background:#e8d5f5;color:#5d2a7a;border-color:#bc9bd9;">${ignoreesAutreCabinet} ligne(s) de l'autre cabinet ignorée(s)</span>`:'') +
           (doublons>0?` <span class="doublon-badge">⚠️ ${doublons} doublon(s)</span>`:'') +
-          (err>0?` ${err} ligne(s) ignorée(s) (police ou prime nette manquante).`:'') +
+          (err>0?` ${err} ligne(s) ignorée(s) (police, prime nette ou cabinet manquant).`:'') +
           (branchesNonReconnues.size>0?` <br>⚠️ <strong>Branche(s) NON RECONNUE(S)</strong> : ${[...branchesNonReconnues].map(b=>`<code>${b}</code>`).join(', ')} — taux de commission par défaut (15%) appliqué provisoirement. Corrige la branche de ces polices une par une (icône ✏️, repérables par le badge rouge "BRANCHE ?") avant de générer le Compte Courant.`:'');
       }
       m.style.display='block';
