@@ -648,6 +648,77 @@
             background: #f9fafb;
             border-top: 1px solid #e5e7eb;
         }
+
+        /* Indicateur LED Firebase */
+        .firebase-led {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+            z-index: 9999;
+        }
+
+        /* États de la LED */
+        .firebase-led.connected {
+            background-color: #10b981;
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+        }
+
+        .firebase-led.offline {
+            background-color: #f59e0b;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.6);
+        }
+
+        .firebase-led.error {
+            background-color: #ef4444;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+            animation: pulse-error 1s infinite;
+        }
+
+        @keyframes pulse-error {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .firebase-led.connecting {
+            background-color: #3b82f6;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* Tooltip pour la LED */
+        .firebase-tooltip {
+            position: absolute;
+            bottom: -35px;
+            right: 0;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 10000;
+        }
+
+        .firebase-led:hover .firebase-tooltip {
+            opacity: 1;
+        }
     </style>
     <!-- Bibliothèque pour génération Word -->
     <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
@@ -672,6 +743,11 @@
     <div id="userInfo" class="user-info" style="display: none;">
         <span>👤 <span id="userName"></span></span>
         <button class="logout-btn" onclick="seDeconnecter()">🚪 Déconnexion</button>
+    </div>
+
+    <!-- INDICATEUR LED FIREBASE -->
+    <div id="firebaseLed" class="firebase-led offline">
+        <div class="firebase-tooltip" id="firebaseTooltip">Initialisatîon...</div>
     </div>
 
     <!-- APPLICATION PRINCIPALE -->
@@ -4651,10 +4727,49 @@
     /**
      * Initialiser Firebase (appelé après login)
      */
+    /**
+     * Mettre à jour l'indicateur LED Firebase
+     */
+    function mettreAJourLEDFirebase(etat, message) {
+        const led = document.getElementById('firebaseLed');
+        const tooltip = document.getElementById('firebaseTooltip');
+        
+        if (!led) return;
+        
+        // Réinitialiser les classes
+        led.className = 'firebase-led';
+        
+        // Appliquer le nouvel état
+        switch(etat) {
+            case 'connected':
+                led.classList.add('connected');
+                tooltip.textContent = `✅ ${message || 'Synchronisé avec Firebase'}`;
+                break;
+            case 'offline':
+                led.classList.add('offline');
+                tooltip.textContent = `⚠️ ${message || 'Mode hors ligne (données locales)'}`;
+                break;
+            case 'error':
+                led.classList.add('error');
+                tooltip.textContent = `❌ ${message || 'Erreur Firebase'}`;
+                break;
+            case 'connecting':
+                led.classList.add('connecting');
+                tooltip.textContent = `🔄 ${message || 'Connexion...'}`;
+                break;
+        }
+    }
+    
+    /**
+     * Initialiser Firebase
+     */
     function initialiserFirebase() {
         try {
+            mettreAJourLEDFirebase('connecting', 'Initialisation...');
+            
             if (typeof firebase === 'undefined') {
                 console.warn('⚠️ Firebase SDK pas encore chargé, réessai...');
+                mettreAJourLEDFirebase('connecting', 'Chargement SDK...');
                 setTimeout(initialiserFirebase, 500);
                 return;
             }
@@ -4662,6 +4777,7 @@
             if (firebase.apps && firebase.apps.length > 0) {
                 console.log('✅ Firebase déjà initialisé');
                 firebaseDb = firebase.database();
+                mettreAJourLEDFirebase('connected', 'Connecté');
                 synchroniserDonneesCloud();
                 return;
             }
@@ -4670,9 +4786,11 @@
             firebase.initializeApp(FIREBASE_CONFIG);
             firebaseDb = firebase.database();
             console.log('✅ Firebase initialisé');
+            mettreAJourLEDFirebase('connected', 'Connecté');
             synchroniserDonneesCloud();
         } catch (error) {
             console.warn('⚠️ Firebase non disponible (mode offline)', error.message);
+            mettreAJourLEDFirebase('offline', 'Mode hors ligne');
             chargerDonneesLocales();
         }
     }
@@ -4779,10 +4897,17 @@
             };
             
             firebaseDb.ref(`utilisateurs/${utilisateurConnecte.replace(/[.@]/g, '_')}`).set(donnees)
-                .then(() => console.log('☁️ Données sauvegardées cloud'))
-                .catch(err => console.warn('⚠️ Erreur cloud:', err.message));
+                .then(() => {
+                    console.log('☁️ Données sauvegardées cloud');
+                    mettreAJourLEDFirebase('connected', 'Synchronisé');
+                })
+                .catch(err => {
+                    console.warn('⚠️ Erreur cloud:', err.message);
+                    mettreAJourLEDFirebase('error', 'Erreur de sync');
+                });
         } catch (error) {
             console.warn('⚠️ Erreur sauvegarde cloud:', error.message);
+            mettreAJourLEDFirebase('offline', 'Données locales');
         }
     }
     
@@ -5203,6 +5328,9 @@
      * Vérifier authentification au chargement
      */
     window.addEventListener('load', () => {
+        // Initialiser la LED
+        mettreAJourLEDFirebase('offline', 'Initialisation...');
+        
         const utilisateur = localStorage.getItem('utilisateur');
         if (utilisateur && UTILISATEURS_AUTORISE[utilisateur]) {
             utilisateurConnecte = utilisateur;
