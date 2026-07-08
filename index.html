@@ -4920,17 +4920,20 @@
     function synchroniserDonneesCloud() {
         if (!firebaseDb) return;
         
-        const cheminUtilisateur = utilisateurConnecte.replace(/[.@]/g, '_');
-        const chemin = `utilisateurs/${cheminUtilisateur}`;
+        // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs (Gaston, Mariette, Yolande)
+        const cheminPartage = 'pca/bdx_donnees';
         
-        // Écouter changements cloud
-        firebaseDb.ref(chemin).on('value', (snapshot) => {
+        console.log(`🔄 Écoute Firebase : ${cheminPartage}`);
+        
+        // Écouter changements cloud en TEMPS RÉEL
+        firebaseDb.ref(cheminPartage).on('value', (snapshot) => {
             const donnees = snapshot.val();
             if (donnees) {
                 contrats = donnees.contrats || [];
                 bdxGeneres = donnees.bdxGeneres || [];
-                console.log('✅ Données synchronisées depuis cloud');
+                console.log(`✅ ${contrats.length} contrats synchronisés depuis cloud`);
                 actualiserAffichage();
+                mettreAJourLEDFirebase('connected', 'Synchronisé');
             }
         });
         
@@ -4951,12 +4954,17 @@
                 contrats: contrats,
                 bdxGeneres: bdxGeneres,
                 derniereMiseAJour: new Date().toISOString(),
-                utilisateur: utilisateurConnecte
+                utilisateur: utilisateurConnecte,
+                // Historique : qui a modifié en dernier
+                dernierModificationPar: utilisateurConnecte.split('@')[0]
             };
             
-            firebaseDb.ref(`utilisateurs/${utilisateurConnecte.replace(/[.@]/g, '_')}`).set(donnees)
+            // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs
+            const cheminPartage = 'pca/bdx_donnees';
+            
+            firebaseDb.ref(cheminPartage).set(donnees)
                 .then(() => {
-                    console.log('☁️ Données sauvegardées cloud');
+                    console.log(`☁️ Données sauvegardées (${utilisateurConnecte})`);
                     mettreAJourLEDFirebase('connected', 'Synchronisé');
                 })
                 .catch(err => {
