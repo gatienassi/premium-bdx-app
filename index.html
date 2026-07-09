@@ -4932,7 +4932,7 @@
                 contrats = donnees.contrats || [];
                 bdxGeneres = donnees.bdxGeneres || [];
                 console.log(`✅ ${contrats.length} contrats synchronisés depuis cloud`);
-                actualiserAffichage();
+                filtrerContratsBDX();
                 mettreAJourLEDFirebase('connected', 'Synchronisé');
             }
         });
@@ -4988,7 +4988,7 @@
                 contrats = parsed.contrats || [];
                 bdxGeneres = parsed.bdxGeneres || [];
                 console.log('✅ Données locales chargées');
-                actualiserAffichage();
+                filtrerContratsBDX();
             }
         } catch (error) {
             console.error('❌ Erreur chargement données:', error);
@@ -5042,7 +5042,7 @@
                         sauvegarderDonneesCloud();
                         
                         actualiserListeContrats();
-                        actualiserAffichage();
+                        filtrerContratsBDX();
                         
                         alert('✅ Données importées avec succès !');
                         console.log(`✅ ${backup.contrats.length} contrats importés`);
@@ -5145,7 +5145,7 @@
                         sauvegarderDonneesCloud();
                         
                         actualiserListeContrats();
-                        actualiserAffichage();
+                        filtrerContratsBDX();
                         
                         let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
                         if (errors.length > 0) {
@@ -5256,7 +5256,7 @@
                         sauvegarderDonneesCloud();
                         
                         actualiserListeContrats();
-                        actualiserAffichage();
+                        filtrerContratsBDX();
                         
                         let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
                         if (errors.length > 0) {
