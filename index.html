@@ -1134,6 +1134,7 @@
                         <button class="btn btn-danger" onclick="document.getElementById('importSauvegardeFile').click()" style="background-color: #dc2626;">🔴 Remplacer par Sauvegarde</button>
                         <button class="btn btn-info" onclick="document.getElementById('importBDXFile').click()">📥 Importer BDX Excel</button>
                         <button class="btn btn-warning" onclick="afficherHistoriqueModifications()">📜 Historique Modifications</button>
+                        <button class="btn btn-info" onclick="forcerSynchronisation()" style="background-color: #0ea5e9;">🔄 Forcer Synchronisation</button>
                         <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importerDonnees(event)">
                         <input type="file" id="importSauvegardeFile" accept=".json" style="display: none;" onchange="remplacerParSauvegarde(event)">
                         <input type="file" id="importBDXFile" accept=".csv,.xlsx,.xls" style="display: none;" onchange="importerBDXExcel(event)">
@@ -4890,6 +4891,13 @@
         // Initialiser app
         initialiserFirebase();
         chargerDonneesLocales();
+        
+        // FORCE SYNC v2.9.6 : Envoyer les données locales à Firebase au démarrage
+        setTimeout(() => {
+            console.log('🔄 FORCE SYNC v2.9.6 : Envoi initial des données à Firebase...');
+            sauvegarderDonneesCloud();
+        }, 1000);
+        
         console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateur}`);
     }
     
@@ -4943,6 +4951,28 @@
         }, 30000);
     }
     
+    /**
+     * Forcer la synchronisation immédiate avec Firebase
+     */
+    function forcerSynchronisation() {
+        if (!firebaseDb) {
+            alert('❌ Firebase non connecté');
+            return;
+        }
+
+        alert('🔄 Synchronisation en cours...');
+        console.log('🔄 FORCE SYNC : Envoi des données à Firebase...');
+        
+        // Forcer l'écriture
+        sauvegarderDonneesCloud();
+        
+        // Attendre 2 secondes puis actualiser depuis Firebase
+        setTimeout(() => {
+            synchroniserDonneesCloud();
+            alert('✅ Synchronisation terminée !\n\nLes données ont été synchronisées avec Firebase.\nActualisez la page chez les autres utilisateurs (F5) pour voir les changements.');
+        }, 2000);
+    }
+
     /**
      * Sauvegarder données sur Firebase Cloud
      */
