@@ -1035,8 +1035,9 @@
 
                 <div id="listeBDX"></div>
 
-                <div style="margin-top: 20px; display: flex; gap: 15px;" class="no-print">
+                <div style="margin-top: 20px; display: flex; gap: 15px; flex-wrap: wrap;" class="no-print">
                     <button class="btn btn-success" onclick="genererPDF()">📄 Générer PDF</button>
+                    <button class="btn btn-info" onclick="exporterBDXExcel()" style="background-color: #059669;">📊 Exporter Excel</button>
                     <button class="btn btn-primary" onclick="ouvrirModalReglement()">✅ Marquer Sélection comme Réglée</button>
                     <button class="btn btn-warning" onclick="archiverSelection()">📦 Archiver Sélection</button>
                 </div>
@@ -3501,6 +3502,99 @@
         // ============================================
         // HISTORIQUE
         // ============================================
+        
+        /**
+         * Exporter les BDX sélectionnés en Excel
+         */
+        function exporterBDXExcel() {
+            const numeroBDX = document.getElementById('numeroBDX').value;
+            if (!numeroBDX) {
+                alert('⚠️ Veuillez saisir un numéro de bordereau');
+                return;
+            }
+
+            if (!window.contratsSelectionnes || window.contratsSelectionnes.size === 0) {
+                alert('⚠️ Aucun contrat sélectionné');
+                return;
+            }
+
+            try {
+                const contratsSelectionnesArray = contrats.filter(c => window.contratsSelectionnes.has(c.id));
+                const compagnie = document.getElementById('bdxCompagnie').value || 'Toutes';
+                const dateGeneration = new Date().toLocaleDateString('fr-FR');
+
+                // Préparer les données
+                const donnees = [];
+                
+                // En-tête
+                donnees.push(['BORDEREAU DE RÈGLEMENT']);
+                donnees.push(['Premium Courtage Assur - N° 211 MEF/DGTCP/DA']);
+                donnees.push(['']);
+                donnees.push([`N° BDX: ${numeroBDX}`, '', '', '', `Date: ${dateGeneration}`]);
+                donnees.push([`Compagnie: ${compagnie}`]);
+                donnees.push(['']);
+                
+                // En-têtes colonnes
+                donnees.push(['#', 'Client', 'Police', 'Immatriculation', 'Compagnie', 'Type', 'Prime Nette', 'Taxe', 'Prime TTC', 'Commission', 'À Verser']);
+                
+                // Données des contrats
+                let totalPrimeNette = 0, totalTaxe = 0, totalPrimeTTC = 0, totalCommission = 0, totalAVerser = 0;
+                
+                contratsSelectionnesArray.forEach((contrat, idx) => {
+                    donnees.push([
+                        idx + 1,
+                        contrat.nomClient,
+                        contrat.numeroPolice,
+                        contrat.immatriculation,
+                        contrat.compagnie,
+                        contrat.typeAssurance,
+                        contrat.primeNette || 0,
+                        contrat.taxe || 0,
+                        contrat.primeTTC || 0,
+                        contrat.commissionTotale || 0,
+                        (contrat.primeTTC || 0) - (contrat.commissionTotale || 0)
+                    ]);
+                    
+                    totalPrimeNette += contrat.primeNette || 0;
+                    totalTaxe += contrat.taxe || 0;
+                    totalPrimeTTC += contrat.primeTTC || 0;
+                    totalCommission += contrat.commissionTotale || 0;
+                    totalAVerser += (contrat.primeTTC || 0) - (contrat.commissionTotale || 0);
+                });
+                
+                // Totaux
+                donnees.push(['', '', '', '', '', 'TOTAL', totalPrimeNette, totalTaxe, totalPrimeTTC, totalCommission, totalAVerser]);
+                
+                // Créer le workbook
+                const ws = XLSX.utils.aoa_to_sheet(donnees);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "BDX");
+                
+                // Formater les colonnes
+                ws['!cols'] = [
+                    { wch: 5 },  // #
+                    { wch: 20 }, // Client
+                    { wch: 15 }, // Police
+                    { wch: 15 }, // Immatriculation
+                    { wch: 12 }, // Compagnie
+                    { wch: 12 }, // Type
+                    { wch: 12 }, // Prime Nette
+                    { wch: 10 }, // Taxe
+                    { wch: 12 }, // Prime TTC
+                    { wch: 12 }, // Commission
+                    { wch: 12 }  // À Verser
+                ];
+                
+                // Télécharger
+                const filename = `BDX_${numeroBDX}_${dateGeneration}.xlsx`;
+                XLSX.writeFile(wb, filename);
+                
+                alert(`✅ BDX exporté en Excel : ${filename}`);
+            } catch (error) {
+                console.error('Erreur export Excel:', error);
+                alert(`❌ Erreur lors de l'export : ${error.message}`);
+            }
+        }
         
         function afficherHistorique() {
             const nbContrats = contrats.length;
