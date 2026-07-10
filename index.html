@@ -3420,7 +3420,7 @@
             doc.autoTable({
                 startY: 55,
                 head: [['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus', 'Total Com.', 'Prime à Reverser']],
-                body: tableData,
+                body: tableData.slice(0, Math.min(7, tableData.length)), // PAGINATION v2.9.8 : MAX 7 lignes page 1
                 theme: 'grid',
                 orientation: 'landscape',
                 margin: { left: 10, right: 10, top: 55, bottom: 20 },
@@ -3447,20 +3447,83 @@
                     valign: 'middle'
                 },
                 columnStyles: {
-                    0: { halign: 'left', cellWidth: 22 },      // Client
-                    1: { halign: 'left', cellWidth: 25 },      // Police
-                    2: { halign: 'center', cellWidth: 15 },    // Immat
-                    3: { halign: 'center', cellWidth: 13 },    // Type
-                    4: { halign: 'center', cellWidth: 18 },    // Date Effet
-                    5: { halign: 'center', cellWidth: 18 },    // Date Échéance
-                    6: { halign: 'right', cellWidth: 20 },     // Prime Nette
-                    7: { halign: 'right', cellWidth: 20 },     // Prime TTC
-                    8: { halign: 'right', cellWidth: 18 },     // Commission
-                    9: { halign: 'right', cellWidth: 15 },     // Bonus
-                    10: { halign: 'right', cellWidth: 18 },    // Total Com.
-                    11: { halign: 'right', cellWidth: 20 }     // Prime à Reverser
+                    0: { halign: 'left', cellWidth: 22 },
+                    1: { halign: 'left', cellWidth: 25 },
+                    2: { halign: 'center', cellWidth: 15 },
+                    3: { halign: 'center', cellWidth: 13 },
+                    4: { halign: 'center', cellWidth: 18 },
+                    5: { halign: 'center', cellWidth: 18 },
+                    6: { halign: 'right', cellWidth: 20 },
+                    7: { halign: 'right', cellWidth: 20 },
+                    8: { halign: 'right', cellWidth: 18 },
+                    9: { halign: 'right', cellWidth: 15 },
+                    10: { halign: 'right', cellWidth: 18 },
+                    11: { halign: 'right', cellWidth: 20 }
                 }
             });
+
+            // PAGINATION v2.9.8 : Si > 7 contrats, ajouter les suivants sur page suivante
+            if (tableData.length > 7) {
+                doc.addPage();
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text(`N° BDX: ${numeroBDX} (suite)`, 20, 30);
+                
+                // Boucler par 7 contrats par page
+                for (let i = 7; i < tableData.length; i += 7) {
+                    if (i > 7) {
+                        doc.addPage();
+                        doc.setFontSize(10);
+                        doc.setFont(undefined, 'bold');
+                        doc.text(`N° BDX: ${numeroBDX} (suite)`, 20, 30);
+                    }
+                    
+                    doc.autoTable({
+                        startY: 40,
+                        head: [['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus', 'Total Com.', 'Prime à Reverser']],
+                        body: tableData.slice(i, Math.min(i + 7, tableData.length)),
+                        theme: 'grid',
+                        orientation: 'landscape',
+                        margin: { left: 10, right: 10, top: 40, bottom: 20 },
+                        headStyles: { 
+                            fillColor: [37, 99, 235],
+                            halign: 'center',
+                            valign: 'middle',
+                            fontSize: 8,
+                            fontStyle: 'bold',
+                            textColor: [255, 255, 255],
+                            lineWidth: 0.5,
+                            lineColor: [0, 0, 0],
+                            cellPadding: 2,
+                            overflow: 'linebreak'
+                        },
+                        styles: { 
+                            fontSize: 7,
+                            fontStyle: 'normal',
+                            halign: 'right',
+                            cellPadding: 2,
+                            lineWidth: 0.3,
+                            lineColor: [100, 100, 100],
+                            textColor: [0, 0, 0],
+                            valign: 'middle'
+                        },
+                        columnStyles: {
+                            0: { halign: 'left', cellWidth: 22 },
+                            1: { halign: 'left', cellWidth: 25 },
+                            2: { halign: 'center', cellWidth: 15 },
+                            3: { halign: 'center', cellWidth: 13 },
+                            4: { halign: 'center', cellWidth: 18 },
+                            5: { halign: 'center', cellWidth: 18 },
+                            6: { halign: 'right', cellWidth: 20 },
+                            7: { halign: 'right', cellWidth: 20 },
+                            8: { halign: 'right', cellWidth: 18 },
+                            9: { halign: 'right', cellWidth: 15 },
+                            10: { halign: 'right', cellWidth: 18 },
+                            11: { halign: 'right', cellWidth: 20 }
+                        }
+                    });
+                }
+            }
 
             const totalPrimeTTC = contratsSelectionnesArray.reduce((sum, c) => sum + c.primeTTC, 0);
             const totalCommission = contratsSelectionnesArray.reduce((sum, c) => sum + c.commissionTotale, 0);
