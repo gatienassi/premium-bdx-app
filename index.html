@@ -769,6 +769,7 @@
                 <button class="tab" onclick="switchTab('historique')">📜 Historique</button>
                 <button class="tab" onclick="switchTab('taux')">💰 Voir Taux</button>
                 <button class="tab" onclick="switchTab('sauvegarde')">💾 Sauvegarde</button>
+                <button class="tab" id="btnAdmin" onclick="switchTab('admin')" style="background-color: #dc2626; color: white; display: none;">🔐 Admin</button>
             </div>
 
             <!-- ONGLET SAISIE -->
@@ -4903,7 +4904,57 @@
                 </div>
             </form>
         </div>
-    </div>
+
+            <!-- ONGLET ADMIN v2.9.10 -->
+            <div id="admin" class="tab-content">
+                <h3 style="color: #dc2626;">🔐 Panneau Admin v2.9.10</h3>
+                <p style="background-color: #fee2e2; padding: 15px; border-radius: 8px; border-left: 4px solid #dc2626;">
+                    <strong>⚠️ Réservé à l'Administrateur</strong><br>
+                    Seul Gaston peut modifier les rôles utilisateur.
+                </p>
+                
+                <h4 style="margin-top: 30px; color: #059669;">👥 Gestion des Rôles</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px;">
+                    <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
+                        <strong>Gaston</strong><br>
+                        <span style="color: #6b7280;">gaston@premium.com</span><br>
+                        <span style="background-color: #dc2626; color: white; padding: 3px 8px; border-radius: 12px; font-size: 0.8em; margin-top: 8px; display: inline-block;">
+                            ADMINISTRATEUR
+                        </span>
+                    </div>
+                    <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
+                        <strong>Mariette</strong><br>
+                        <span style="color: #6b7280;">mariette@premium.com</span><br>
+                        <select onchange="changerRole('mariette@premium.com', this.value)" style="margin-top: 8px; padding: 6px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <option value="ADMINISTRATEUR">Administrateur</option>
+                            <option value="ÉDITEUR" selected>Éditeur</option>
+                            <option value="LECTEUR">Lecteur</option>
+                        </select>
+                    </div>
+                    <div style="border: 1px solid #e5e7eb; padding: 15px; border-radius: 8px;">
+                        <strong>Yolande</strong><br>
+                        <span style="color: #6b7280;">yolande@premium.com</span><br>
+                        <select onchange="changerRole('yolande@premium.com', this.value)" style="margin-top: 8px; padding: 6px; border: 1px solid #d1d5db; border-radius: 6px;">
+                            <option value="ADMINISTRATEUR">Administrateur</option>
+                            <option value="ÉDITEUR">Éditeur</option>
+                            <option value="LECTEUR" selected>Lecteur</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <h4 style="margin-top: 30px; color: #3b82f6;">📊 Statistiques</h4>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                    <div style="border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; background-color: #eff6ff;">
+                        <strong style="color: #1e40af;">Contrats</strong><br>
+                        <span id="statsContrats" style="font-size: 1.5em; color: #1e40af;">0</span>
+                    </div>
+                    <div style="border: 1px solid #bfdbfe; padding: 15px; border-radius: 8px; background-color: #eff6ff;">
+                        <strong style="color: #1e40af;">Utilisateurs Actifs</strong><br>
+                        <span style="font-size: 1.5em; color: #1e40af;">3</span>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div> <!-- Fermeture appContainer -->
 
     <script>
@@ -4930,7 +4981,28 @@
     };
     
     // Rôles utilisateurs (définit accès application)
+    // v2.9.10 : RÔLES ET PERMISSIONS
+    const ROLES_DISPONIBLES = {
+        'ADMINISTRATEUR': ['consulter', 'saisir', 'modifier', 'supprimer', 'gérer_rôles', 'audit'],
+        'ÉDITEUR': ['consulter', 'saisir', 'modifier', 'audit_personnel'],
+        'LECTEUR': ['consulter', 'exporter']
+    };
+
     const ROLES_UTILISATEURS = {
+        'gaston@premium.com': 'ADMINISTRATEUR',    // Admin - gère tout
+        'mariette@premium.com': 'ÉDITEUR',         // Éditeur - saisit et modifie
+        'yolande@premium.com': 'LECTEUR'           // Lecteur - consulte seulement
+    };
+    
+    // Fonction simple pour vérifier permission
+    function aLaPermission(permission) {
+        if (!roleUtilisateur) return false;
+        const perms = ROLES_DISPONIBLES[roleUtilisateur] || [];
+        return perms.includes(permission);
+    }
+    
+    // Ancien système (garde pour compatibilité)
+    const ROLES_UTILISATEURS_ANCIEN = {
         'gaston@premium.com': 'admin',           // ✅ Admin complet - tout faire
         'yolande@premium.com': 'superviseur',    // ⚠️ Superviseur - voir tout sauf modifier passwords
         'mariette@premium.com': 'superviseur'    // ⚠️ Superviseur - voir tout sauf modifier passwords
@@ -5048,6 +5120,9 @@
         // Initialiser app
         initialiserFirebase();
         chargerDonneesLocales();
+        
+        // v2.9.10 : Initialiser les permissions admin
+        initialiserAdmin();
         
         // FORCE SYNC v2.9.6 : Envoyer les données locales à Firebase au démarrage
         setTimeout(() => {
@@ -5599,6 +5674,52 @@
             document.getElementById('appContainer').style.display = 'none';
         }
     });
+    
+    // v2.9.10 : FONCTIONS ADMIN SIMPLES
+    
+    function initialiserAdmin() {
+        // Afficher bouton Admin seulement pour ADMINISTRATEUR
+        if (roleUtilisateur === 'ADMINISTRATEUR') {
+            document.getElementById('btnAdmin').style.display = 'inline-block';
+        }
+        
+        // Afficher Saisie pour ÉDITEUR et ADMIN seulement
+        const btnSaisie = Array.from(document.querySelectorAll('.tab')).find(b => b.textContent.includes('Saisie'));
+        if (btnSaisie) {
+            if (roleUtilisateur === 'LECTEUR') {
+                btnSaisie.style.display = 'none';
+            } else {
+                btnSaisie.style.display = 'inline-block';
+            }
+        }
+        
+        // Mettre à jour stats
+        document.getElementById('statsContrats').textContent = contrats.length;
+        
+        console.log(`✅ Admin initialisé pour ${roleUtilisateur}`);
+    }
+    
+    function changerRole(email, nouveauRole) {
+        if (roleUtilisateur !== 'ADMINISTRATEUR') {
+            alert('❌ Seul l\'administrateur peut changer les rôles');
+            return;
+        }
+        
+        if (!confirm(`Changer le rôle de ${email} à ${nouveauRole} ?`)) {
+            return;
+        }
+        
+        ROLES_UTILISATEURS[email] = nouveauRole;
+        alert(`✅ Rôle de ${email.split('@')[0]} changé à ${nouveauRole}`);
+        console.log(`✅ ${email} → ${nouveauRole}`);
+        
+        // Sauvegarder dans Firebase si disponible
+        if (firebaseDb) {
+            firebaseDb.ref('pca/roles_utilisateurs').set(ROLES_UTILISATEURS).catch(err => {
+                console.warn('⚠️ Erreur sauvegarde rôles:', err.message);
+            });
+        }
+    }
     </script>
 
 </body>
