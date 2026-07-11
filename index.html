@@ -5162,7 +5162,10 @@
      * Sauvegarder données sur Firebase Cloud
      */
     function sauvegarderDonneesCloud() {
-        if (!firebaseDb || !utilisateurConnecte) return;
+        if (!firebaseDb || !utilisateurConnecte) {
+            console.warn('❌ v3.0.2 : Firebase ou utilisateur non disponible');
+            return;
+        }
         
         try {
             const donnees = {
@@ -5170,25 +5173,27 @@
                 bdxGeneres: bdxGeneres,
                 derniereMiseAJour: new Date().toISOString(),
                 utilisateur: utilisateurConnecte,
-                // Historique : qui a modifié en dernier
                 dernierModificationPar: utilisateurConnecte.split('@')[0]
             };
             
             // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs
             const cheminPartage = 'pca/bdx_donnees';
             
+            console.log(`📤 v3.0.2 : Envoi de ${contrats.length} contrats à Firebase...`);
+            
             firebaseDb.ref(cheminPartage).set(donnees)
                 .then(() => {
-                    console.log(`☁️ Données sauvegardées (${utilisateurConnecte})`);
+                    console.log(`✅ v3.0.2 : ${contrats.length} contrats SAUVEGARDÉS à Firebase ✅`);
                     mettreAJourLEDFirebase('connected', 'Synchronisé');
                 })
                 .catch(err => {
-                    console.warn('⚠️ Erreur cloud:', err.message);
+                    console.error(`❌ v3.0.2 ERREUR : ${err.message}`);
+                    console.error(`❌ Vérifiez les permissions Firebase !`);
                     mettreAJourLEDFirebase('error', 'Erreur de sync');
                 });
         } catch (error) {
-            console.warn('⚠️ Erreur sauvegarde cloud:', error.message);
-            mettreAJourLEDFirebase('offline', 'Données locales');
+            console.error('❌ Erreur sauvegarde:', error.message);
+            mettreAJourLEDFirebase('offline', 'Erreur');
         }
     }
     
@@ -5714,6 +5719,50 @@
             console.log(`✅ Permissions initialisées : ${roleUtilisateur}`);
         }
     }
+    
+    // v3.0.2 : RESTAURER depuis JSON
+    function restaurerDepuisJSON() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    
+                    if (data.contrats && Array.isArray(data.contrats)) {
+                        contrats = data.contrats;
+                        localStorage.setItem('contrats', JSON.stringify(contrats));
+                        
+                        console.log(`✅ v3.0.2 : ${contrats.length} contrats restaurés depuis JSON`);
+                        alert(`✅ ${contrats.length} contrats restaurés depuis JSON`);
+                        
+                        // Afficher les données restaurées
+                        actualiserListeContrats();
+                        filtrerContratsBDX();
+                        
+                        // Envoyer à Firebase
+                        console.log('📤 Envoi à Firebase...');
+                        setTimeout(() => {
+                            sauvegarderDonneesCloud();
+                        }, 500);
+                    } else {
+                        alert('❌ Format JSON invalide');
+                    }
+                } catch (err) {
+                    alert(`❌ Erreur lecture JSON: ${err.message}`);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+    
+    window.restaurerDepuisJSON = restaurerDepuisJSON;
     </script>
 
 </body>
