@@ -5065,19 +5065,17 @@
         // Initialiser app
         initialiserFirebase();
         
-        // v3.0.1 : ENVOYER les données locales À FIREBASE EN PRIORITÉ avant de charger
-        console.log('🔄 v3.0.1 : Envoi prioritaire des données locales à Firebase...');
-        chargerDonneesLocales(); // Charger ce qu'on a en local
+        // v3.0.3 : CHARGER FIREBASE EN PRIORITÉ, puis localStorage, puis ENVOYER DE FORCE
+        console.log('🔄 v3.0.3 : Démarrage robuste...');
         
-        // Attendre 2 secondes pour que l'envoi soit bien fait, PUIS charger depuis Firebase
+        // Étape 1 : Charger les données locales en mémoire
+        chargerDonneesLocales();
+        const contratsLocaux = [...contrats];
+        console.log(`📦 Locales chargées : ${contratsLocaux.length} contrats`);
+        
+        // Étape 2 : Charger depuis Firebase
         setTimeout(() => {
-            console.log('🔄 v3.0.1 : Envoi à Firebase fait, maintenant charger depuis Firebase...');
-            sauvegarderDonneesCloud(); // Envoyer immédiatement
-            
-            setTimeout(() => {
-                console.log('🔄 v3.0.1 : Fusion complète en cours...');
-                chargerDepuisFirebaseEnPriorite(); // Puis charger depuis Firebase
-            }, 1500);
+            chargerDepuisFirebaseEnPrioriteFinal();
         }, 500);
         
         // v2.9.10 : Initialiser les permissions
@@ -5163,7 +5161,7 @@
      */
     function sauvegarderDonneesCloud() {
         if (!firebaseDb || !utilisateurConnecte) {
-            console.warn('❌ v3.0.2 : Firebase ou utilisateur non disponible');
+            console.warn('❌ v3.0.3 : Firebase ou utilisateur non disponible');
             return;
         }
         
@@ -5179,16 +5177,26 @@
             // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs
             const cheminPartage = 'pca/bdx_donnees';
             
-            console.log(`📤 v3.0.2 : Envoi de ${contrats.length} contrats à Firebase...`);
+            if (contrats.length === 0) {
+                console.warn('⚠️ v3.0.3 : Pas de contrats à envoyer');
+                return;
+            }
+            
+            console.log(`📤 v3.0.3 : Envoi de ${contrats.length} contrats à Firebase via chemin: ${cheminPartage}...`);
             
             firebaseDb.ref(cheminPartage).set(donnees)
                 .then(() => {
-                    console.log(`✅ v3.0.2 : ${contrats.length} contrats SAUVEGARDÉS à Firebase ✅`);
+                    console.log(`✅✅ v3.0.3 : ${contrats.length} contrats SAUVEGARDÉS à Firebase ✅✅`);
+                    console.log(`✅✅ Les données sont SÛRES - vous pouvez vider le cache ! ✅✅`);
                     mettreAJourLEDFirebase('connected', 'Synchronisé');
                 })
                 .catch(err => {
-                    console.error(`❌ v3.0.2 ERREUR : ${err.message}`);
-                    console.error(`❌ Vérifiez les permissions Firebase !`);
+                    console.error(`❌ v3.0.3 ERREUR CRITIQUE : ${err.message}`);
+                    console.error(`❌ Les données NE SONT PAS à Firebase !`);
+                    console.error(`❌ Vérifiez:`);
+                    console.error(`   1. Les règles Firebase permettent l'écriture`);
+                    console.error(`   2. Le chemin 'pca/bdx_donnees' est correct`);
+                    console.error(`   3. La connexion Firebase fonctionne`);
                     mettreAJourLEDFirebase('error', 'Erreur de sync');
                 });
         } catch (error) {
@@ -5634,6 +5642,76 @@
     });
     
     // v3.0 : CHARGER DEPUIS FIREBASE EN PRIORITÉ AU DÉMARRAGE
+    // v3.0.3 : NOUVEAU FLUX ROBUSTE - Charger Firebase, puis envoyer de force
+    function chargerDepuisFirebaseEnPrioriteFinal() {
+        const cheminPartage = 'pca/bdx_donnees';
+        
+        if (!firebaseDb) {
+            console.log('⚠️ Firebase non disponible, utilisation des données locales');
+            return;
+        }
+        
+        // Lire depuis Firebase
+        firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+            const donneesCloud = snapshot.val();
+            
+            const cloudCount = donneesCloud && donneesCloud.contrats ? donneesCloud.contrats.length : 0;
+            const localCount = contrats.length;
+            
+            console.log(`📊 v3.0.3 : Firebase=${cloudCount} | Local=${localCount}`);
+            
+            // Décision : qu'utiliser ?
+            if (cloudCount > 0) {
+                // Firebase a des données = utiliser Firebase
+                console.log(`✅ v3.0.3 : Utiliser Firebase (${cloudCount} contrats)`);
+                contrats = donneesCloud.contrats;
+                bdxGeneres = donneesCloud.bdxGeneres || [];
+            } else if (localCount > 0) {
+                // Firebase vide mais localStorage a des données
+                console.log(`✅ v3.0.3 : Firebase vide, utiliser localStorage (${localCount} contrats)`);
+                // Garder les contrats locaux
+            } else {
+                console.log(`⚠️ v3.0.3 : Aucune donnée Firebase ni locale`);
+            }
+            
+            // Sauvegarder localement
+            localStorage.setItem('contrats', JSON.stringify(contrats));
+            localStorage.setItem('bdxGeneres', JSON.stringify(bdxGeneres));
+            
+            // Afficher
+            actualiserListeContrats();
+            filtrerContratsBDX();
+            
+            // ÉTAPE CRUCIALE : Envoyer À FIREBASE DE FORCE
+            console.log(`📤 v3.0.3 : Envoi de ${contrats.length} contrats à Firebase...`);
+            
+            setTimeout(() => {
+                sauvegarderDonneesCloud(); // Envoyer vraiment à Firebase
+                
+                // Vérifier après 2 secondes
+                setTimeout(() => {
+                    firebaseDb.ref(cheminPartage).once('value', (check) => {
+                        const verification = check.val();
+                        const verifyCount = verification && verification.contrats ? verification.contrats.length : 0;
+                        
+                        if (verifyCount > 0) {
+                            console.log(`✅✅ v3.0.3 : VÉRIFICATION OK - ${verifyCount} contrats dans Firebase ✅✅`);
+                        } else {
+                            console.error(`❌ v3.0.3 : VÉRIFICATION ÉCHOUÉE - Firebase n'a pas reçu les données !`);
+                            console.error(`❌ Vérifiez les règles Firebase et les permissions`);
+                        }
+                    });
+                }, 2000);
+            }, 500);
+            
+            // Mettre en place l'écoute temps réel
+            synchroniserDonneesCloud();
+            
+        }).catch(err => {
+            console.warn('⚠️ Erreur lecture Firebase:', err.message);
+        });
+    }
+    
     function chargerDepuisFirebaseEnPriorite() {
         const cheminPartage = 'pca/bdx_donnees';
         
