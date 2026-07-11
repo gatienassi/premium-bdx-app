@@ -1127,6 +1127,19 @@
                 <!-- SAUVEGARDE & SÉCURITÉ -->
                 <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin-bottom: 30px;">
                     <h3 style="color: var(--primary); margin-bottom: 15px;">💾 Sauvegarde & Sécurité</h3>
+                    
+                    <!-- v3.0.4 : BOUTONS MANUELS -->
+                    <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                        <h4 style="color: #d97706; margin: 0 0 10px 0;">🔐 v3.0.4 : Synchronisation Manuelle</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn" onclick="restaurerDepuisJSON()" style="background-color: #0ea5e9; color: white;">📥 Restaurer depuis JSON</button>
+                            <button class="btn" onclick="sauvegarderManuelAFirebase()" style="background-color: #10b981; color: white;">☁️ SAUVEGARDER À FIREBASE</button>
+                        </div>
+                        <p style="font-size: 12px; color: #92400e; margin: 10px 0 0 0;">
+                            ⚠️ IMPORTANT : Après restauration, cliquez sur "SAUVEGARDER À FIREBASE" et attendez le message ✅ avant de vider le cache !
+                        </p>
+                    </div>
+                    
                     <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
                         <button class="btn btn-success" onclick="exporterDonnees('json')">💾 Export JSON</button>
                         <button class="btn btn-success" onclick="exporterDonnees('excel')">📊 Export Excel</button>
@@ -5816,18 +5829,15 @@
                         contrats = data.contrats;
                         localStorage.setItem('contrats', JSON.stringify(contrats));
                         
-                        console.log(`✅ v3.0.2 : ${contrats.length} contrats restaurés depuis JSON`);
-                        alert(`✅ ${contrats.length} contrats restaurés depuis JSON`);
+                        console.log(`✅ v3.0.4 : ${contrats.length} contrats restaurés depuis JSON`);
+                        console.log(`📝 Les contrats sont chargés localement.`);
+                        console.log(`⏳ Cliquez maintenant sur "SAUVEGARDER À FIREBASE" pour envoyer à Firebase`);
+                        alert(`✅ ${contrats.length} contrats restaurés depuis JSON\n\n⏳ Cliquez maintenant sur "SAUVEGARDER À FIREBASE" pour envoyer à Firebase`);
                         
                         // Afficher les données restaurées
                         actualiserListeContrats();
                         filtrerContratsBDX();
                         
-                        // Envoyer à Firebase
-                        console.log('📤 Envoi à Firebase...');
-                        setTimeout(() => {
-                            sauvegarderDonneesCloud();
-                        }, 500);
                     } else {
                         alert('❌ Format JSON invalide');
                     }
@@ -5840,7 +5850,75 @@
         input.click();
     }
     
+    // v3.0.4 : SAUVEGARDE MANUELLE ROBUSTE À FIREBASE
+    function sauvegarderManuelAFirebase() {
+        if (contrats.length === 0) {
+            alert('❌ Aucun contrat à sauvegarder');
+            return;
+        }
+        
+        console.log(`\n🚀 v3.0.4 : DÉBUT SAUVEGARDE MANUELLE`);
+        console.log(`📊 Contrats en mémoire : ${contrats.length}`);
+        
+        if (!firebaseDb) {
+            console.error('❌ Firebase non disponible');
+            alert('❌ Firebase non disponible');
+            return;
+        }
+        
+        const cheminPartage = 'pca/bdx_donnees';
+        const donnees = {
+            contrats: contrats,
+            bdxGeneres: bdxGeneres || [],
+            derniereMiseAJour: new Date().toISOString(),
+            utilisateur: utilisateurConnecte,
+            dernierModificationPar: utilisateurConnecte.split('@')[0]
+        };
+        
+        console.log(`📤 v3.0.4 : Envoi de ${contrats.length} contrats à Firebase...`);
+        console.log(`📍 Chemin Firebase : ${cheminPartage}`);
+        
+        // ÉTAPE 1 : Envoyer
+        firebaseDb.ref(cheminPartage).set(donnees)
+            .then(() => {
+                console.log(`✅ v3.0.4 : ${contrats.length} contrats ENVOYÉS à Firebase`);
+                
+                // ÉTAPE 2 : Attendre 2 secondes puis VÉRIFIER
+                setTimeout(() => {
+                    console.log(`🔍 v3.0.4 : VÉRIFICATION en cours...`);
+                    
+                    firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+                        const verif = snapshot.val();
+                        const verifCount = verif && verif.contrats ? verif.contrats.length : 0;
+                        
+                        if (verifCount > 0) {
+                            console.log(`✅✅ v3.0.4 : VÉRIFICATION RÉUSSIE - ${verifCount} contrats dans Firebase ✅✅`);
+                            console.log(`✅✅ Les données sont SÛRES dans Firebase ! ✅✅`);
+                            console.log(`✅✅ Vous pouvez maintenant vider le cache SANS RISQUE ! ✅✅`);
+                            
+                            alert(`✅✅ ${verifCount} contrats SAUVEGARDÉS ET VÉRIFIÉS dans Firebase ✅✅\n\nVous pouvez maintenant :\n1. Vider le cache (Ctrl+Shift+Suppr)\n2. Rafraîchir la page\n3. Les contrats se rechargeront depuis Firebase`);
+                        } else {
+                            console.error(`❌ VÉRIFICATION ÉCHOUÉE - Firebase n'a pas reçu les données`);
+                            alert(`❌ Erreur : Firebase n'a pas reçu les données. Vérifiez les règles Firebase.`);
+                        }
+                    }).catch(err => {
+                        console.error(`❌ Erreur vérification : ${err.message}`);
+                    });
+                }, 2000);
+            })
+            .catch(err => {
+                console.error(`❌ ERREUR ENVOI : ${err.message}`);
+                console.error(`❌ Les données NE sont PAS à Firebase !`);
+                console.error(`❌ Vérifiez :`);
+                console.error(`   - Les règles Firebase`);
+                console.error(`   - Le chemin 'pca/bdx_donnees'`);
+                console.error(`   - La connexion Firebase`);
+                alert(`❌ Erreur : ${err.message}\n\nVérifiez les règles Firebase et la connexion`);
+            });
+    }
+    
     window.restaurerDepuisJSON = restaurerDepuisJSON;
+    window.sauvegarderManuelAFirebase = sauvegarderManuelAFirebase;
     </script>
 
 </body>
