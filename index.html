@@ -5064,16 +5064,13 @@
         
         // Initialiser app
         initialiserFirebase();
-        chargerDonneesLocales();
+        
+        // v3.0 : CHARGER FIREBASE EN PRIORITÉ au démarrage
+        console.log('🔄 v3.0 : Chargement prioritaire de Firebase au démarrage...');
+        chargerDepuisFirebaseEnPriorite();
         
         // v2.9.10 : Initialiser les permissions
         initialiserPermissionsV2910();
-        
-        // FORCE SYNC v2.9.6 : Envoyer les données locales à Firebase au démarrage
-        setTimeout(() => {
-            console.log('🔄 FORCE SYNC v2.9.6 : Envoi initial des données à Firebase...');
-            sauvegarderDonneesCloud();
-        }, 1000);
         
         console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateur}`);
     }
@@ -5619,6 +5616,83 @@
             document.getElementById('appContainer').style.display = 'none';
         }
     });
+    
+    // v3.0 : CHARGER DEPUIS FIREBASE EN PRIORITÉ AU DÉMARRAGE
+    function chargerDepuisFirebaseEnPriorite() {
+        const cheminPartage = 'pca/bdx_donnees';
+        
+        if (!firebaseDb) {
+            console.log('⚠️ Firebase non disponible, charger en local');
+            chargerDonneesLocales();
+            return;
+        }
+        
+        // Lire UNE FOIS depuis Firebase (pas d'écoute continue)
+        firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+            const donneesCloud = snapshot.val();
+            
+            if (donneesCloud && donneesCloud.contrats) {
+                // Charger d'abord les locales
+                chargerDonneesLocales();
+                
+                // PUIS FUSIONNER avec Firebase
+                const contratsLocaux = [...contrats];
+                contrats = fusionnerContrats(donneesCloud.contrats, contratsLocaux);
+                bdxGeneres = donneesCloud.bdxGeneres || [];
+                
+                console.log(`✅ v3.0 : ${contrats.length} contrats chargés depuis Firebase au démarrage`);
+                
+                // Sauvegarder localement cette version fusionnée
+                localStorage.setItem('contrats', JSON.stringify(contrats));
+                localStorage.setItem('bdxGeneres', JSON.stringify(bdxGeneres));
+                
+                // Afficher les données fusionnées
+                actualiserListeContrats();
+                filtrerContratsBDX();
+            } else {
+                // Si rien dans Firebase, charger local
+                chargerDonneesLocales();
+            }
+            
+            // APRÈS avoir chargé, écouter les changements en temps réel
+            synchroniserDonneesCloud();
+            
+            // FORCE SYNC : envoyer aussi nos données à Firebase
+            setTimeout(() => {
+                sauvegarderDonneesCloud();
+            }, 2000);
+        }).catch(err => {
+            console.warn('⚠️ Erreur lecture Firebase au démarrage:', err.message);
+            chargerDonneesLocales();
+        });
+    }
+    
+    /**
+     * FUSION INTELLIGENTE v2.9.9 (rappel)
+     */
+    function fusionnerContrats(contratsCloud, contratsLocaux) {
+        if (!contratsCloud || contratsCloud.length === 0) {
+            return contratsLocaux;
+        }
+        if (!contratsLocaux || contratsLocaux.length === 0) {
+            return contratsCloud;
+        }
+
+        // Créer un map des IDs cloud
+        const idsCloud = new Set(contratsCloud.map(c => c.id));
+        
+        // Fusionner : tous les cloud + les locaux qui ne sont pas dans le cloud
+        const contractsFusionnes = [...contratsCloud];
+        
+        contratsLocaux.forEach(c => {
+            if (!idsCloud.has(c.id)) {
+                contractsFusionnes.push(c);
+            }
+        });
+
+        console.log(`🔄 FUSION : ${contratsCloud.length} cloud + ${contratsLocaux.filter(c => !idsCloud.has(c.id)).length} locaux = ${contractsFusionnes.length} total`);
+        return contractsFusionnes;
+    }
     
     // v2.9.10 : Masquer onglet Saisie pour LECTEUR
     function initialiserPermissionsV2910() {
