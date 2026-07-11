@@ -5065,9 +5065,20 @@
         // Initialiser app
         initialiserFirebase();
         
-        // v3.0 : CHARGER FIREBASE EN PRIORITÉ au démarrage
-        console.log('🔄 v3.0 : Chargement prioritaire de Firebase au démarrage...');
-        chargerDepuisFirebaseEnPriorite();
+        // v3.0.1 : ENVOYER les données locales À FIREBASE EN PRIORITÉ avant de charger
+        console.log('🔄 v3.0.1 : Envoi prioritaire des données locales à Firebase...');
+        chargerDonneesLocales(); // Charger ce qu'on a en local
+        
+        // Attendre 2 secondes pour que l'envoi soit bien fait, PUIS charger depuis Firebase
+        setTimeout(() => {
+            console.log('🔄 v3.0.1 : Envoi à Firebase fait, maintenant charger depuis Firebase...');
+            sauvegarderDonneesCloud(); // Envoyer immédiatement
+            
+            setTimeout(() => {
+                console.log('🔄 v3.0.1 : Fusion complète en cours...');
+                chargerDepuisFirebaseEnPriorite(); // Puis charger depuis Firebase
+            }, 1500);
+        }, 500);
         
         // v2.9.10 : Initialiser les permissions
         initialiserPermissionsV2910();
@@ -5622,48 +5633,43 @@
         const cheminPartage = 'pca/bdx_donnees';
         
         if (!firebaseDb) {
-            console.log('⚠️ Firebase non disponible, charger en local');
-            chargerDonneesLocales();
+            console.log('⚠️ Firebase non disponible');
             return;
         }
         
-        // Lire UNE FOIS depuis Firebase (pas d'écoute continue)
+        // Lire depuis Firebase
         firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
             const donneesCloud = snapshot.val();
             
-            if (donneesCloud && donneesCloud.contrats) {
-                // Charger d'abord les locales
-                chargerDonneesLocales();
-                
-                // PUIS FUSIONNER avec Firebase
+            const cloudCount = donneesCloud && donneesCloud.contrats ? donneesCloud.contrats.length : 0;
+            const localCount = contrats.length;
+            
+            console.log(`📊 Firebase : ${cloudCount} contrats | Local : ${localCount} contrats`);
+            
+            if (donneesCloud && donneesCloud.contrats && cloudCount > 0) {
+                // Mémoriser les contrats locaux actuels
                 const contratsLocaux = [...contrats];
+                
+                // FUSIONNER Firebase + Local
                 contrats = fusionnerContrats(donneesCloud.contrats, contratsLocaux);
                 bdxGeneres = donneesCloud.bdxGeneres || [];
                 
-                console.log(`✅ v3.0 : ${contrats.length} contrats chargés depuis Firebase au démarrage`);
+                console.log(`✅ v3.0.1 FUSION : ${cloudCount} cloud + ${contratsLocaux.filter(c => !new Set(donneesCloud.contrats.map(x => x.id)).has(c.id)).length} nouveaux local = ${contrats.length} TOTAL`);
                 
-                // Sauvegarder localement cette version fusionnée
+                // Sauvegarder localement la version fusionnée
                 localStorage.setItem('contrats', JSON.stringify(contrats));
                 localStorage.setItem('bdxGeneres', JSON.stringify(bdxGeneres));
                 
                 // Afficher les données fusionnées
                 actualiserListeContrats();
                 filtrerContratsBDX();
-            } else {
-                // Si rien dans Firebase, charger local
-                chargerDonneesLocales();
             }
             
-            // APRÈS avoir chargé, écouter les changements en temps réel
+            // Écouter les changements en temps réel
             synchroniserDonneesCloud();
             
-            // FORCE SYNC : envoyer aussi nos données à Firebase
-            setTimeout(() => {
-                sauvegarderDonneesCloud();
-            }, 2000);
         }).catch(err => {
-            console.warn('⚠️ Erreur lecture Firebase au démarrage:', err.message);
-            chargerDonneesLocales();
+            console.warn('⚠️ Erreur lecture Firebase:', err.message);
         });
     }
     
