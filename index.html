@@ -3136,9 +3136,9 @@
 
             // Filtrer par statut et archivage
             if (affichage === 'non_regles_actifs') {
-                contratsFiltres = contratsFiltres.filter(c => !c.regle && !c.archive);
+                contratsFiltres = contratsFiltres.filter(c => !c.regle && !c.archive && !c.bdx_genere);  // ✅ v3.0.7 : Exclure bdx_genere
             } else if (affichage === 'tous_actifs') {
-                contratsFiltres = contratsFiltres.filter(c => !c.archive);
+                contratsFiltres = contratsFiltres.filter(c => !c.archive && !c.bdx_genere);  // ✅ v3.0.7 : Exclure bdx_genere
             } else if (affichage === 'regles_actifs') {
                 contratsFiltres = contratsFiltres.filter(c => c.regle && !c.archive);
             } else if (affichage === 'archives') {
@@ -3335,21 +3335,31 @@
                 return;
             }
 
-            if (confirm(`Archiver ${window.contratsSelectionnes.size} contrat(s) ?\n\nLes contrats archivés ne seront plus affichés par défaut mais resteront accessibles via le filtre "Archivés".`)) {
+            const nombreArchives = window.contratsSelectionnes.size;
+            
+            if (confirm(`Archiver ${nombreArchives} contrat(s) ?
+
+Les contrats archivés seront marqués comme traités (BDX généré) et disparaîtront de "Générer BDX".`)) {
                 contrats.forEach(c => {
                     if (window.contratsSelectionnes.has(c.id)) {
                         c.archive = true;
+                        c.bdx_genere = true;  // ✅ v3.0.7 : Marquer comme traité
                     }
                 });
 
-                sauvegarderDonnees();
+                // ✅ v3.0.7 : Sauvegarder IMMÉDIATEMENT à Firebase
+                console.log(`🚀 v3.0.7 : Archivage de ${nombreArchives} contrat(s)...`);
+                sauvegarderDonneesCloudImmediatement();
+                
                 window.contratsSelectionnes.clear();
                 filtrerContratsBDX();
                 afficherHistorique();
                 
-                alert('✅ Contrats archivés');
+                console.log(`✅ v3.0.7 : ${nombreArchives} contrats archivés et SAUVEGARDÉS à Firebase`);
+                alert(`✅ ${nombreArchives} contrats archivés et sauvegardés à Firebase`);
             }
         }
+
 
         function desarchiverContrat(id) {
             const contrat = contrats.find(c => c.id === id);
@@ -5850,6 +5860,35 @@
     }
     
     // v3.0.4 : SAUVEGARDE MANUELLE ROBUSTE À FIREBASE
+    // v3.0.7 : Sauvegarde immédiate à Firebase (sans boîte de dialogue)
+    function sauvegarderDonneesCloudImmediatement() {
+        if (!firebaseDb || !utilisateurConnecte) {
+            console.warn('⚠️ v3.0.7 : Firebase ou utilisateur non disponible');
+            return;
+        }
+
+        const cheminPartage = 'pca/bdx_donnees';
+        const donnees = {
+            contrats: contrats,
+            bdxGeneres: bdxGeneres || [],
+            derniereMiseAJour: new Date().toISOString(),
+            utilisateur: utilisateurConnecte,
+            dernierModificationPar: utilisateurConnecte.split('@')[0]
+        };
+
+        console.log(`📤 v3.0.7 : Envoi immédiat de ${contrats.length} contrats à Firebase...`);
+
+        firebaseDb.ref(cheminPartage).set(donnees)
+            .then(() => {
+                console.log(`✅ v3.0.7 : Données sauvegardées immédiatement à Firebase`);
+                mettreAJourLEDFirebase('connected', 'Synchronisé');
+            })
+            .catch(err => {
+                console.error(`❌ v3.0.7 : Erreur : ${err.message}`);
+                mettreAJourLEDFirebase('error', 'Erreur de sync');
+            });
+    }
+    
     function sauvegarderManuelAFirebase() {
         if (contrats.length === 0) {
             alert('❌ Aucun contrat à sauvegarder');
