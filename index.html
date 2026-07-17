@@ -4437,6 +4437,61 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         /**
          * Sauvegarder les taux modifiés
          */
+        // ✅ v3.0.8 : SYNCHRONISATION TAUX À FIREBASE
+        function sauvegarderTauxAFirebase(taux) {
+            if (!firebaseDb) {
+                console.warn('⚠️ v3.0.8 : Firebase non disponible');
+                return;
+            }
+            
+            console.log(`📤 v3.0.8 : Envoi des taux modifiés à Firebase...`);
+            
+            const donneesTaux = {
+                commission: taux.commission,
+                bonus: taux.bonus,
+                dateModification: taux.dateModification,
+                modifiePar: utilisateurConnecte || 'inconnu'
+            };
+            
+            firebaseDb.ref('pca/taux_personnalises').set(donneesTaux)
+                .then(() => {
+                    console.log(`✅✅ v3.0.8 : Taux SAUVEGARDÉS à Firebase ✅✅`);
+                    console.log(`✅✅ Les modifications sont maintenant SYNCHRONISÉES ! ✅✅`);
+                    mettreAJourLEDFirebase('connected', 'Synchronisé');
+                })
+                .catch(err => {
+                    console.error(`❌ v3.0.8 ERREUR : ${err.message}`);
+                    console.error(`❌ Les taux n'ont pas pu être sauvegardés à Firebase !`);
+                    mettreAJourLEDFirebase('error', 'Erreur sync taux');
+                });
+        }
+        
+        // ✅ v3.0.8 : CHARGER TAUX DEPUIS FIREBASE AU DÉMARRAGE
+        function chargerTauxDepuisFirebase() {
+            if (!firebaseDb) return;
+            
+            console.log(`📥 v3.0.8 : Chargement des taux depuis Firebase...`);
+            
+            firebaseDb.ref('pca/taux_personnalises').once('value', (snapshot) => {
+                const tauxCloud = snapshot.val();
+                
+                if (tauxCloud && tauxCloud.commission && tauxCloud.bonus) {
+                    // Charger depuis Firebase (priorité)
+                    Object.assign(TAUX_COMMISSION, tauxCloud.commission);
+                    Object.assign(TAUX_BONUS, tauxCloud.bonus);
+                    
+                    console.log(`✅ v3.0.8 : Taux chargés depuis Firebase`);
+                } else {
+                    // Si Firebase vide, charger depuis localStorage
+                    console.log(`ℹ️ v3.0.8 : Firebase n'a pas de taux, utilisation localStorage`);
+                    chargerTauxPersonnalises();
+                }
+            }).catch(err => {
+                console.warn(`⚠️ v3.0.8 : Erreur Firebase, utilisation localStorage : ${err.message}`);
+                chargerTauxPersonnalises();
+            });
+        }
+        
         function sauvegarderTaux() {
             if (!confirm('⚠️ ATTENTION\n\nCette action va :\n- Modifier tous les taux de commission et bonus\n- Sauvegarder les nouvelles valeurs\n- Les nouveaux taux seront appliqués aux NOUVEAUX contrats uniquement\n\nVoulez-vous continuer ?')) {
                 return;
@@ -4480,6 +4535,9 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             localStorage.setItem('taux_personnalises', JSON.stringify(tauxAEnregistrer));
             
             console.log(`✅ ${nbModifications} taux modifiés et sauvegardés`);
+            
+            // ✅ v3.0.8 : Sauvegarder à Firebase IMMÉDIATEMENT
+            sauvegarderTauxAFirebase(tauxAEnregistrer);
             
             // Actualiser l'affichage
             afficherTableauTaux();
@@ -4662,6 +4720,11 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         window.onload = function() {
             chargerTauxPersonnalises();
             init();
+            
+            // ✅ v3.0.8 : Charger taux depuis Firebase (synchronisation)
+            setTimeout(() => {
+                chargerTauxDepuisFirebase();
+            }, 1000);  // Attendre que Firebase soit initialisé
         };
     </script>
     <!-- MODALE RÈGLEMENT -->
