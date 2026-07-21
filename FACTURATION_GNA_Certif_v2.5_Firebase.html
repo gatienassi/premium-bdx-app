@@ -8,8 +8,8 @@
     <meta http-equiv="Expires" content="0">
     <title>Facturation GNA - v2.5 Connexion Partagée Firebase</title>
     <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap');
         
@@ -2497,10 +2497,23 @@
         /**
          * Initialiser Firebase et démarrer la synchronisation partagée
          */
+        let tentativesInitFirebaseGNA = 0;
+
         function initialiserFirebaseGNA() {
             try {
                 if (typeof firebase === 'undefined') {
-                    console.warn('⚠️ Firebase SDK pas encore chargé, réessai...');
+                    tentativesInitFirebaseGNA++;
+                    if (tentativesInitFirebaseGNA > 20) {
+                        // Après ~10s d'échec, on arrête de boucler silencieusement : le SDK
+                        // Firebase n'a manifestement pas pu se charger (bloqué par le réseau,
+                        // un bloqueur de script, ou une URL cassée). L'app reste utilisable en
+                        // local, mais plus personne ne verra les données des collègues tant que
+                        // ce n'est pas résolu — mieux vaut le signaler que de rester silencieux.
+                        console.error('❌ Firebase SDK n\'a pas pu être chargé après 20 tentatives. Synchronisation cloud désactivée pour cette session.');
+                        afficherAlerteSyncIndisponible();
+                        return;
+                    }
+                    console.warn(`⚠️ Firebase SDK pas encore chargé, réessai... (${tentativesInitFirebaseGNA}/20)`);
                     setTimeout(initialiserFirebaseGNA, 500);
                     return;
                 }
@@ -2514,7 +2527,23 @@
                 ecouterDonneesPartageesGNA();
             } catch (error) {
                 console.warn('⚠️ Firebase non disponible (mode local uniquement)', error.message);
+                afficherAlerteSyncIndisponible();
             }
+        }
+
+        /**
+         * Bannière discrète mais visible pour signaler que la synchronisation cloud
+         * est indisponible pour cette session — évite qu'un problème comme celui du
+         * 21/07/2026 (SDK jamais chargé, personne ne voit les données des collègues)
+         * ne passe inaperçu pendant des jours.
+         */
+        function afficherAlerteSyncIndisponible() {
+            if (document.getElementById('alerteSyncIndisponible')) return; // déjà affichée
+            const banniere = document.createElement('div');
+            banniere.id = 'alerteSyncIndisponible';
+            banniere.style.cssText = 'position:fixed; top:0; left:0; right:0; background:#c0392b; color:white; text-align:center; padding:8px; font-size:13px; z-index:9999;';
+            banniere.innerHTML = '⚠️ Synchronisation cloud indisponible pour cette session — vos données restent enregistrées localement, mais ne sont pas partagées avec vos collègues tant que ce message est affiché. Rechargez la page (F5) ou vérifiez votre connexion internet.';
+            document.body.appendChild(banniere);
         }
 
         /**
