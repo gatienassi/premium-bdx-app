@@ -2114,6 +2114,9 @@
                                 <button class="btn" onclick="ajouterLigneAjustementBDX()" style="font-size: 12px; padding: 8px 14px; background:#ff9800; color:white; border:none;" title="Ajoute automatiquement une ligne de surplus/chèque complémentaire pour équilibrer avec la Prime TTC">
                                     ⚖️ Ajouter l'ajustement
                                 </button>
+                                <button id="bdxBoutonAvoir" class="btn" onclick="ajouterChequeComplementaireAvoirBDX()" style="font-size: 12px; padding: 8px 14px; background:#6a1b9a; color:white; border:none; display:none;" title="Cette police a un avoir accordé par le cabinet : ajoute le chèque complémentaire correspondant, à la charge du cabinet">
+                                    🔖 Ajouter le chèque complémentaire (avoir)
+                                </button>
                             </div>
                         </div>
                         <div class="table-responsive">
@@ -2131,6 +2134,7 @@
                             </table>
                         </div>
                         <div id="bdxLigneAjustement" style="margin-top: 12px; padding: 12px; border-radius: 8px; font-size: 13px; font-weight: 600;"></div>
+                        <div id="bdxHintAvoir" style="margin-top: 8px; padding: 10px 12px; border-radius: 8px; font-size: 12px; background:#f3e5f5; color:#6a1b9a; display:none;"></div>
                     </div>
 
                     <div>
@@ -10772,18 +10776,13 @@
             } else if (ecart > 0) {
                 ligneAjustement.style.background = '#fff3e0';
                 ligneAjustement.style.color = '#e67e22';
-                ligneAjustement.innerHTML = `SURPLUS&nbsp; : &nbsp;${formatCurrency(ecart)} FCFA — utilisez "⚖️ Ajouter l'ajustement" pour l'enregistrer`;
+                ligneAjustement.innerHTML = `SURPLUS&nbsp; : &nbsp;${formatCurrency(ecart)} FCFA — normal si des frais courtier ou un avoir sont déjà inclus dans le chèque du client ; n'utilisez "⚖️ Ajouter l'ajustement" que si ce surplus correspond à un trop-perçu réel à signaler séparément`;
             } else {
                 ligneAjustement.style.background = '#ffebee';
                 ligneAjustement.style.color = '#c0392b';
                 ligneAjustement.innerHTML = `CHEQUE/ESPÈCES COMPLÉMENTAIRE À PRÉVOIR&nbsp; : &nbsp;${formatCurrency(-ecart)} FCFA — utilisez "⚖️ Ajouter l'ajustement" pour l'enregistrer`;
             }
 
-            // TOTAL REÇU (bloc commission) = UNIQUEMENT le(s) règlement(s) du client
-            // (chèque ou espèces), à l'exclusion de la ligne d'ajustement
-            // surplus/complémentaire ajoutée via le bouton "⚖️" — celle-ci reste
-            // visible dans le bloc RÈGLEMENT et dans le récap, mais ne doit pas
-            // fausser le calcul de ce qui reste réellement dû.
             const totalRecuClient = bdxEnCours.cheques
                 .filter(ch => !ch.estAjustement)
                 .reduce((s, ch) => s + (ch.montant || 0), 0);
@@ -10803,6 +10802,72 @@
             document.getElementById('bdxComTotalCom').textContent = formatCurrency(totalCom) + ' FCFA';
             document.getElementById('bdxComTotalSurplus').textContent = formatCurrency(ecartClient) + ' FCFA';
             document.getElementById('bdxComTotalDue').textContent = formatCurrency(totalCom + ecartClient) + ' FCFA';
+
+            // --- Avoir police (v2.38) : si la police a un avoir accordé par le
+            // cabinet, le client règle net de cet avoir — le cabinet doit fournir un
+            // chèque complémentaire du montant de l'avoir pour que la compagnie
+            // reçoive bien la Prime TTC complète. On calcule ce montant et on
+            // propose de l'ajouter directement comme un vrai règlement (traçable),
+            // plutôt que de fausser artificiellement le TOTAL SURPLUS.
+            const policeActuelle = document.getElementById('bdxPolice').value.trim();
+            const montantAvoir = calculerMontantAvoirBDX(policeActuelle, totalPrimeNette, totalPrimeTTC);
+            const dejaAjouteAvoir = bdxEnCours.cheques.some(ch => ch.estAjustement && ch.libelle && ch.libelle.startsWith('CHEQUE COMPLEMENTAIRE (avoir'));
+            const boutonAvoir = document.getElementById('bdxBoutonAvoir');
+            const hintAvoir = document.getElementById('bdxHintAvoir');
+            if (montantAvoir > 0 && !dejaAjouteAvoir) {
+                boutonAvoir.style.display = 'inline-block';
+                hintAvoir.style.display = 'block';
+                hintAvoir.innerHTML = `🔖 Cette police a un avoir accordé par le cabinet — montant suggéré du chèque complémentaire à sa charge : <strong>${formatCurrency(montantAvoir)} FCFA</strong>. Utilisez le bouton "🔖 Ajouter le chèque complémentaire (avoir)" ci-dessus pour l'enregistrer.`;
+            } else {
+                boutonAvoir.style.display = 'none';
+                hintAvoir.style.display = 'none';
+            }
+        }
+
+        /**
+         * Calcule le montant de l'avoir à la charge du cabinet pour la police
+         * donnée, sur la base de POLICES_CONFIG (avoir_pct ou avoir_conditionnel,
+         * même règle que celle appliquée lors de l'établissement de la facture
+         * client — voir calculateFacture). Retourne 0 si la police n'a pas d'avoir.
+         */
+        function calculerMontantAvoirBDX(policeNumero, totalPrimeNette, totalPrimeTTC) {
+            const config = POLICES_CONFIG[policeNumero];
+            if (!config) return 0;
+            let avoirPct = config.avoir_pct || 0;
+            if (config.avoir_conditionnel && totalPrimeTTC >= config.avoir_conditionnel.seuil) {
+                avoirPct = config.avoir_conditionnel.pct;
+            }
+            if (avoirPct <= 0) return 0;
+            return Math.round((totalPrimeNette * avoirPct) / 100);
+        }
+
+        /**
+         * Ajoute le chèque complémentaire correspondant à l'avoir de la police,
+         * avec le montant suggéré déjà calculé — modifiable avant enregistrement
+         * comme n'importe quelle autre ligne de règlement.
+         */
+        function ajouterChequeComplementaireAvoirBDX() {
+            const t = bdxEnCours._totaux;
+            const policeActuelle = document.getElementById('bdxPolice').value.trim();
+            const config = POLICES_CONFIG[policeActuelle];
+            let avoirPct = config ? (config.avoir_pct || 0) : 0;
+            if (config && config.avoir_conditionnel && t.totalPrimeTTC >= config.avoir_conditionnel.seuil) {
+                avoirPct = config.avoir_conditionnel.pct;
+            }
+            const montantAvoir = calculerMontantAvoirBDX(policeActuelle, t.totalPrimeNette, t.totalPrimeTTC);
+            if (montantAvoir <= 0) {
+                alert('ℹ️ Aucun avoir détecté pour cette police.');
+                return;
+            }
+            bdxEnCours.cheques.push({
+                mode: 'cheque',
+                libelle: `CHEQUE COMPLEMENTAIRE (avoir ${avoirPct}%)`,
+                numero: '',
+                montant: montantAvoir,
+                estAjustement: true
+            });
+            afficherChequesBDX();
+            recalculerTableauBDX();
         }
 
         // ------------------------------------------------------------
@@ -11036,7 +11101,7 @@
 
                 // Encadré ASSURÉ — compacté sur 2 lignes pour profiter de la largeur
                 // disponible en paysage plutôt que d'empiler verticalement.
-                doc.setDrawColor(200, 200, 200);
+                doc.setDrawColor(140, 140, 140);
                 doc.setFillColor(248, 249, 250);
                 doc.setLineWidth(0.3);
                 doc.roundedRect(margeG, y, largeur, 18, 2, 2, 'FD');
@@ -11111,8 +11176,8 @@
                     doc.setFillColor(245, 245, 250);
                     doc.rect(margeG, y, largeur, hauteurLigne, 'F');
                 }
-                doc.setDrawColor(220, 220, 220);
-                doc.setLineWidth(0.1);
+                doc.setDrawColor(140, 140, 140);
+                doc.setLineWidth(0.15);
                 doc.rect(margeG, y, largeur, hauteurLigne);
                 doc.setFontSize(7.5);
 
@@ -11178,8 +11243,8 @@
             doc.setFont(undefined, 'normal');
             let yReglement = y + 7;
 
-            doc.setDrawColor(200, 200, 200);
-            doc.setLineWidth(0.2);
+            doc.setDrawColor(150, 150, 150);
+            doc.setLineWidth(0.15);
 
             if (nbLignesCheques === 0) {
                 doc.setFillColor(250, 250, 250);
@@ -11946,51 +12011,65 @@
                     compteur = 0;
                 }
 
-                const aAjustementLigne = l.chequesAjustement && l.chequesAjustement.length > 0;
-                const hauteurLigne = aAjustementLigne ? 11 : 7;
+                // (v2.40) Hauteur calculée sur le nombre RÉEL de sous-lignes à afficher
+                // (chèques clients + ajustements), chacune sur sa propre ligne — plus de
+                // texte fusionné avec " / " qui pouvait déborder de la cellule et chevaucher
+                // la bordure du dessous quand un BDX avait plusieurs chèques clients.
+                const nbLignesClient = Math.max(l.chequesClient.length, 1);
+                const nbLignesAjustement = l.chequesAjustement.length;
+                const nbSousLignes = nbLignesClient + nbLignesAjustement;
+                const hauteurLigne = nbSousLignes * 4 + 3;
+
                 if (idx % 2 === 0) {
                     doc.setFillColor(245, 245, 250);
                     doc.rect(margeG, y, largeur, hauteurLigne, 'F');
                 }
-                doc.setDrawColor(220, 220, 220);
-                doc.setLineWidth(0.1);
+                // Bordures assombries (v2.40) pour rester visibles à l'impression noir et
+                // blanc — l'ancien gris très clair (220,220,220) devenait quasi invisible.
+                doc.setDrawColor(140, 140, 140);
+                doc.setLineWidth(0.15);
                 doc.rect(margeG, y, largeur, hauteurLigne);
                 doc.setFontSize(6.8);
-
-                const chequeClientTxt = l.chequesClient.map(ch => libelleReglement(ch)).join(' / ') || '—';
-                const numeroManquant = l.chequesClient.some(ch => ch.mode !== 'espece' && !ch.numero);
 
                 doc.text(`N°${l.numeroBDX}`, colonnes[0].x + 1, y + 4.8, { maxWidth: colonnes[0].w - 2 });
                 doc.text(String(l.periodeEmission || ''), colonnes[1].x + 1, y + 4.8, { maxWidth: colonnes[1].w - 2 });
                 doc.text(String(l.nbCertificats), colonnes[2].x + colonnes[2].w / 2, y + 4.8, { align: 'center' });
                 doc.text(String(l.police || ''), colonnes[3].x + 1, y + 4.8, { maxWidth: colonnes[3].w - 2 });
                 doc.text(String(l.souscripteur || ''), colonnes[4].x + 1, y + 4.8, { maxWidth: colonnes[4].w - 2 });
-                if (numeroManquant) {
-                    doc.setFont(undefined, 'italic');
-                    doc.setTextColor(0, 0, 0);
-                    doc.text(chequeClientTxt + ' ⚠', colonnes[5].x + 1, y + 4.8, { maxWidth: colonnes[5].w - 2 });
-                    doc.setFont(undefined, 'normal');
-                } else {
-                    doc.text(chequeClientTxt, colonnes[5].x + 1, y + 4.8, { maxWidth: colonnes[5].w - 2 });
-                }
-                doc.text(formatCurrency(l.montantRecuClient), colonnes[6].x + colonnes[6].w - 1, y + 4.8, { align: 'right' });
                 doc.text(formatCurrency(l.totalPrimeNette), colonnes[7].x + colonnes[7].w - 1, y + 4.8, { align: 'right' });
                 doc.text(formatCurrency(l.totalAccessoires), colonnes[8].x + colonnes[8].w - 1, y + 4.8, { align: 'right' });
                 doc.text(formatCurrency(l.totalTaxe), colonnes[9].x + colonnes[9].w - 1, y + 4.8, { align: 'right' });
                 doc.text(formatCurrency(l.totalPrimeTTC), colonnes[10].x + colonnes[10].w - 1, y + 4.8, { align: 'right' });
                 doc.text(formatCurrency(l.totalCommission), colonnes[11].x + colonnes[11].w - 1, y + 4.8, { align: 'right' });
 
-                if (aAjustementLigne) {
-                    const chequeAjustTxt = l.chequesAjustement.map(ch => libelleReglement(ch)).join(' / ');
-                    doc.setDrawColor(230, 230, 230);
+                // Chèque(s)/Espèces + Montant Reçus : une sous-ligne par chèque client,
+                // chacune avec son propre montant (plus clair qu'un montant agrégé face à
+                // plusieurs libellés fusionnés).
+                let yLigne = y + 4.8;
+                if (l.chequesClient.length === 0) {
+                    doc.text('—', colonnes[5].x + 1, yLigne);
+                } else {
+                    l.chequesClient.forEach(ch => {
+                        const manquant = ch.mode !== 'espece' && !ch.numero;
+                        if (manquant) doc.setFont(undefined, 'italic');
+                        doc.text(libelleReglement(ch) + (manquant ? ' ⚠' : ''), colonnes[5].x + 1, yLigne, { maxWidth: colonnes[5].w - 2 });
+                        if (manquant) doc.setFont(undefined, 'normal');
+                        doc.text(formatCurrency(ch.montant), colonnes[6].x + colonnes[6].w - 1, yLigne, { align: 'right' });
+                        yLigne += 4;
+                    });
+                }
+
+                if (nbLignesAjustement > 0) {
+                    doc.setDrawColor(160, 160, 160);
                     doc.setLineWidth(0.1);
-                    doc.line(colonnes[5].x, y + 7, margeD, y + 7);
+                    doc.line(colonnes[5].x, yLigne - 2, margeD, yLigne - 2);
                     doc.setFont(undefined, 'italic');
                     doc.setFontSize(6);
-                    doc.setTextColor(0, 0, 0);
-                    doc.text(chequeAjustTxt, colonnes[5].x + 1, y + 9.5, { maxWidth: colonnes[5].w - 2 });
-                    doc.text(formatCurrency(l.montantAjustement), colonnes[6].x + colonnes[6].w - 1, y + 9.5, { align: 'right' });
-                    doc.setTextColor(0, 0, 0);
+                    l.chequesAjustement.forEach(ch => {
+                        doc.text(libelleReglement(ch), colonnes[5].x + 1, yLigne, { maxWidth: colonnes[5].w - 2 });
+                        doc.text(formatCurrency(ch.montant), colonnes[6].x + colonnes[6].w - 1, yLigne, { align: 'right' });
+                        yLigne += 4;
+                    });
                     doc.setFont(undefined, 'normal');
                     doc.setFontSize(6.8);
                 }
@@ -12035,6 +12114,9 @@
             doc.setTextColor(0, 0, 0);
             doc.setFont(undefined, 'normal');
             let yR = y + 7;
+
+            doc.setDrawColor(150, 150, 150);
+            doc.setLineWidth(0.15);
 
             function ligneReglement(libelle, montant, gras) {
                 doc.setFillColor(248, 249, 250);
@@ -12134,7 +12216,7 @@
             }
 
             const largeurVisa = 85;
-            doc.setDrawColor(180, 180, 180);
+            doc.setDrawColor(130, 130, 130);
             doc.setLineWidth(0.3);
             doc.rect(margeD - largeurVisa, yVisa, largeurVisa, 24);
 
