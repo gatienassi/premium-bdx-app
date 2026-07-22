@@ -2397,12 +2397,14 @@
         // 16/07/2026 pour le compromis sécurité associé.
         const UTILISATEURS_AUTORISE_GNA = {
             'gaston@premium.com': 'Gaston2026',
-            'marie@premium.com': 'Marie2026'
+            'marie@premium.com': 'Marie2026',
+            'laure@premium.com': 'Laure2026'
         };
 
         const ROLES_UTILISATEURS_GNA = {
             'gaston@premium.com': 'admin',
-            'marie@premium.com': 'utilisateur'
+            'marie@premium.com': 'utilisateur',
+            'laure@premium.com': 'utilisateur'
         };
 
         let utilisateurConnecteGNA = null;
@@ -10993,28 +10995,33 @@
             const titreCommission = `COMMISSION ${familleBDX === 'FAP SAUF' ? 'FAP SAUF' : 'TR'} PCA`;
 
             const { jsPDF } = window.jspdf;
-            // Portrait (papier à en-tête Premium Courtage Assur imprimé en portrait)
-            const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+            // Paysage (v2.28) : passage en paysage pour donner plus de place aux
+            // colonnes (N° FDI, N° BL, etc.) et surtout pour permettre un calcul de
+            // pagination fiable qui ne perd plus de lignes (voir bug du 21/07/2026 :
+            // avec trop de lignes autorisées par page, les 3-4 dernières étaient
+            // dessinées hors de la zone visible de la page et disparaissaient).
+            const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
 
-            const margeG = 10;
-            const margeD = 200;
+            const margeG = 12;
+            const margeD = 285;
             const largeur = margeD - margeG;
+            const hauteurPage = 210; // A4 paysage
+            const basPageUtile = 195; // ne rien dessiner sous cette ligne (marge de sécurité)
 
-            // Page 1 : moins de place (letterhead + encadré ASSURÉ) ; pages suivantes : plus de place.
-            const lignesParPage = 32;
-            const lignesParPageSuite = 48;
-            const necessitePlusieursPages = bdxEnCours.certificats.length > lignesParPage;
+            // Page 1 : moins de place (encadré ASSURÉ) ; pages suivantes : plus de place.
+            // (v2.29) Seul le courrier de transmission est imprimé sur papier à
+            // en-tête — le BDX est imprimé sur papier normal, donc plus besoin de
+            // réserver une grande zone haute vide : marge remise à une valeur standard.
+            const lignesParPage = 23;
+            const lignesParPageSuite = 28;
 
-            // Zone haute laissée libre pour impression sur papier à en-tête. Quand le
-            // BDX dépasse une page, on remonte tout le contenu de la page 1 de 1,5 cm
-            // pour laisser assez de marge avant le pied de page imprimé.
-            const margeHautLetterhead = necessitePlusieursPages ? 30 : 45;
+            const margeHautLetterhead = 15;
             let y = margeHautLetterhead;
 
             function enteteBDX() {
-                doc.setTextColor(15, 76, 129);
+                doc.setTextColor(0, 0, 0);
                 doc.setFontSize(14);
-                doc.setFont(undefined, 'bold');
+                doc.setFont(undefined, 'bolditalic');
                 doc.text('COMMISSIONS DUES P/C PREMIUM COURTAGE ASSUR', (margeG + margeD) / 2, y, { align: 'center' });
                 y += 9;
 
@@ -11027,44 +11034,46 @@
                 doc.text(`Date : ${dateBDX}`, margeD, y, { align: 'right' });
                 y += 7;
 
-                // Encadré ASSURÉ — même présentation que le bloc CLIENT de la facture
+                // Encadré ASSURÉ — compacté sur 2 lignes pour profiter de la largeur
+                // disponible en paysage plutôt que d'empiler verticalement.
                 doc.setDrawColor(200, 200, 200);
                 doc.setFillColor(248, 249, 250);
                 doc.setLineWidth(0.3);
-                doc.roundedRect(margeG, y, largeur, 26, 2, 2, 'FD');
+                doc.roundedRect(margeG, y, largeur, 18, 2, 2, 'FD');
 
                 doc.setFontSize(10);
-                doc.setFont(undefined, 'bold');
-                doc.setTextColor(15, 76, 129);
+                doc.setFont(undefined, 'bolditalic');
+                doc.setTextColor(0, 0, 0);
                 doc.text('ASSURÉ', margeG + 3, y + 6);
 
-                doc.setFont(undefined, 'normal');
+                doc.setFont(undefined, 'bold');
                 doc.setFontSize(9);
                 doc.setTextColor(0, 0, 0);
                 doc.text(`NOM : ${assure}`, margeG + 3, y + 12);
-                doc.text(`POLICE : ${police}`, margeG + 3, y + 17);
-                doc.text(`TYPE : ${typePolice}`, margeG + 3, y + 22);
+                doc.setFont(undefined, 'normal');
+                doc.text(`POLICE : ${police}`, margeG + 100, y + 12);
+                doc.text(`TYPE : ${typePolice}`, margeG + 190, y + 12);
                 doc.setFont(undefined, 'bold');
-                doc.text(`GARANTIE : ${garantie}`, margeG + 95, y + 22);
+                doc.text(`GARANTIE : ${garantie}`, margeG + 3, y + 16.5);
                 doc.setFont(undefined, 'normal');
 
-                y += 32;
+                y += 18 + 4;
             }
 
             enteteBDX();
 
             const colonnes = [
-                { titre: 'N°', x: margeG, w: 7, align: 'left' },
-                { titre: 'Réf. Certificat', x: margeG + 7, w: 30, align: 'left' },
-                { titre: 'Date Cert.', x: margeG + 37, w: 14, align: 'left' },
-                { titre: 'N° FDI', x: margeG + 51, w: 13, align: 'left' },
-                { titre: 'N° BL', x: margeG + 64, w: 13, align: 'left' },
-                { titre: 'Val. Assurance', x: margeG + 77, w: 26, align: 'right' },
-                { titre: 'Prime Nette', x: margeG + 103, w: 19, align: 'right' },
-                { titre: 'Access.', x: margeG + 122, w: 12, align: 'right' },
-                { titre: 'Taxe', x: margeG + 134, w: 9, align: 'right' },
-                { titre: 'Prime TTC', x: margeG + 143, w: 21, align: 'right' },
-                { titre: `COM ${taux}%`, x: margeG + 164, w: 26, align: 'right' }
+                { titre: 'N°', x: margeG, w: 8, align: 'left' },
+                { titre: 'Réf. Certificat', x: margeG + 8, w: 36, align: 'left' },
+                { titre: 'Date Cert.', x: margeG + 44, w: 16, align: 'left' },
+                { titre: 'N° FDI', x: margeG + 60, w: 24, align: 'left' },
+                { titre: 'N° BL', x: margeG + 84, w: 34, align: 'left' },
+                { titre: 'Val. Assurance', x: margeG + 118, w: 34, align: 'right' },
+                { titre: 'Prime Nette', x: margeG + 152, w: 28, align: 'right' },
+                { titre: 'Access.', x: margeG + 180, w: 16, align: 'right' },
+                { titre: 'Taxe', x: margeG + 196, w: 13, align: 'right' },
+                { titre: 'Prime TTC', x: margeG + 209, w: 30, align: 'right' },
+                { titre: `COM ${taux}%`, x: margeG + 239, w: 34, align: 'right' }
             ];
 
             function entetesColonnes() {
@@ -11072,7 +11081,7 @@
                 doc.rect(margeG, y, largeur, 7, 'F');
                 doc.setTextColor(255, 255, 255);
                 doc.setFont(undefined, 'bold');
-                doc.setFontSize(6.5);
+                doc.setFontSize(7.5);
                 colonnes.forEach(col => {
                     doc.text(col.titre, col.align === 'right' ? col.x + col.w - 1 : col.x + 1, y + 5, { align: col.align });
                 });
@@ -11092,7 +11101,7 @@
 
                 if (lignesDansPage >= maxLignes) {
                     doc.addPage();
-                    y = 20;
+                    y = 15;
                     entetesColonnes();
                     lignesDansPage = 0;
                 }
@@ -11105,7 +11114,7 @@
                 doc.setDrawColor(220, 220, 220);
                 doc.setLineWidth(0.1);
                 doc.rect(margeG, y, largeur, hauteurLigne);
-                doc.setFontSize(6.5);
+                doc.setFontSize(7.5);
 
                 const com = (c.primeNette || 0) * (taux / 100);
                 doc.text(String(idx + 1), colonnes[0].x + 1, y + 4);
@@ -11129,7 +11138,7 @@
             doc.rect(margeG, y, largeur, 7, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFont(undefined, 'bold');
-            doc.setFontSize(7.5);
+            doc.setFontSize(8);
             doc.text('TOTAL GENERAL', colonnes[1].x + 1, y + 5);
             doc.text(formatCurrency(t.totalValeur), colonnes[5].x + colonnes[5].w - 1, y + 5, { align: 'right' });
             doc.text(formatCurrency(t.totalPrimeNette), colonnes[6].x + colonnes[6].w - 1, y + 5, { align: 'right' });
@@ -11144,20 +11153,21 @@
             // BLOCS RÈGLEMENT + COMMISSION (design redessiné)
             // ============================================
             const nbLignesCheques = bdxEnCours.cheques.length;
-            const aAjustement = Math.abs(t.ecart) >= 1 && nbLignesCheques > 0;
-            const hauteurReglement = 8 + (nbLignesCheques * 6) + (aAjustement ? 7 : 0) + 4;
-            const hauteurCommission = 7 + 46; // en-tête + 6 champs + ligne "COMMISSION TOTAL DUE"
+            const hauteurReglement = 8 + 6 + Math.max(nbLignesCheques, 1) * 6 + 4; // +6 pour la ligne "Ajustements provenant des BDX"
+            const hauteurCommission = 7 + 38; // en-tête + 4 champs + ligne "COMMISSION TOTAL DUE"
             const hauteurBlocs = Math.max(hauteurReglement, hauteurCommission);
-            if (y + hauteurBlocs + 35 > 285) {
+            if (y + hauteurBlocs + 30 > basPageUtile) {
                 doc.addPage();
-                y = 20;
+                y = 15;
             }
 
-            const largeurReglement = 105;
-            const largeurCommission = largeur - largeurReglement - 6;
-            const xCommission = margeG + largeurReglement + 6;
+            const largeurReglement = 130;
+            const largeurCommission = largeur - largeurReglement - 8;
+            const xCommission = margeG + largeurReglement + 8;
 
-            // --- Bloc RÈGLEMENT (gauche) ---
+            // --- Bloc RÈGLEMENT (gauche) — UNIQUEMENT les règlements réels saisis.
+            // (v2.28) La ligne "SURPLUS (suggestion)" a été retirée : elle n'a de sens
+            // qu'à l'écran comme aide à la saisie, pas sur un document imprimé/transmis.
             doc.setFillColor(15, 76, 129);
             doc.rect(margeG, y, largeurReglement, 7, 'F');
             doc.setTextColor(255, 255, 255);
@@ -11176,9 +11186,10 @@
                 doc.rect(margeG, yReglement, largeurReglement, 8, 'F');
                 doc.rect(margeG, yReglement, largeurReglement, 8);
                 doc.setFontSize(8);
-                doc.setTextColor(130, 130, 130);
-                doc.text('Aucun règlement renseigné', margeG + 3, yReglement + 5.5);
+                doc.setFont(undefined, 'italic');
                 doc.setTextColor(0, 0, 0);
+                doc.text('Aucun règlement renseigné', margeG + 3, yReglement + 5.5);
+                doc.setFont(undefined, 'normal');
                 yReglement += 8;
             } else {
                 bdxEnCours.cheques.forEach((ch, idx) => {
@@ -11190,29 +11201,14 @@
                     doc.setFontSize(7.5);
                     doc.setFont(undefined, 'normal');
                     const libelleMode = ch.mode === 'espece' ? `ESPECES${ch.libelle ? ' - ' + ch.libelle : ''}` : `${ch.libelle}${ch.numero ? ' N°' + ch.numero : ''}`;
-                    doc.text(libelleMode, margeG + 3, yReglement + 4, { maxWidth: largeurReglement - 40 });
+                    doc.text(libelleMode, margeG + 3, yReglement + 4, { maxWidth: largeurReglement - 45 });
                     doc.text(formatCurrency(ch.montant) + ' FCFA', margeG + largeurReglement - 3, yReglement + 4, { align: 'right' });
                     yReglement += 6;
                 });
-
-                if (aAjustement) {
-                    const estSurplus = t.ecart > 0;
-                    const libelleAjustement = estSurplus ? 'SURPLUS (suggestion)' : 'MANQUE (à compléter)';
-                    if (estSurplus) { doc.setFillColor(255, 243, 224); } else { doc.setFillColor(255, 235, 238); }
-                    doc.rect(margeG, yReglement, largeurReglement, 7, 'F');
-                    doc.rect(margeG, yReglement, largeurReglement, 7);
-                    doc.setFont(undefined, 'bold');
-                    doc.setFontSize(7.5);
-                    doc.setTextColor(estSurplus ? 180 : 192, estSurplus ? 100 : 57, estSurplus ? 30 : 43);
-                    doc.text(libelleAjustement, margeG + 3, yReglement + 4.8);
-                    doc.text(formatCurrency(Math.abs(t.ecart)) + ' FCFA', margeG + largeurReglement - 3, yReglement + 4.8, { align: 'right' });
-                    doc.setTextColor(0, 0, 0);
-                    doc.setFont(undefined, 'normal');
-                    yReglement += 7;
-                }
             }
 
-            // --- Bloc COMMISSION (droite) — 7 champs, titre dynamique TR/FAP SAUF ---
+            // --- Bloc COMMISSION (droite) — 4 champs (v2.28 : TOTAL PRIME HT et
+            // TOTAL PRIME TTC retirés, déjà visibles dans le tableau au-dessus) ---
             doc.setFillColor(15, 76, 129);
             doc.rect(xCommission, y, largeurCommission, 7, 'F');
             doc.setTextColor(255, 255, 255);
@@ -11222,17 +11218,15 @@
             doc.setTextColor(0, 0, 0);
             let yCommission = y + 7;
 
-            // Hauteur recalculée précisément (v2.22) pour que le trait de séparation et
-            // la ligne "COMMISSION TOTAL DUE" restent bien À L'INTÉRIEUR du cadre.
-            const hauteurBoxCommission = 46;
+            // Hauteur recalculée (v2.30) : avec 4 champs + la ligne "COMMISSION TOTAL DUE"
+            // séparée par un filet, il faut 38mm pour que rien ne dépasse du cadre.
+            const hauteurBoxCommission = 38;
             doc.setDrawColor(15, 76, 129);
             doc.setLineWidth(0.4);
             doc.setFillColor(240, 244, 249);
             doc.rect(xCommission, yCommission, largeurCommission, hauteurBoxCommission, 'FD');
 
             const champsCommission = [
-                ['TOTAL PRIME HT', formatCurrency(t.totalPrimeNette) + ' FCFA'],
-                ['TOTAL PRIME TTC', formatCurrency(t.totalPrimeTTC) + ' FCFA'],
                 ['TOTAL REÇU', formatCurrency(t.totalRecuClient) + ' FCFA'],
                 ['TAUX DE COMMISSION', taux + '%'],
                 ['TOTAL COMMISSION', formatCurrency(t.totalCom) + ' FCFA'],
@@ -11241,43 +11235,43 @@
             doc.setFontSize(7.5);
             let yLigneCom = yCommission + 6;
             champsCommission.forEach(([label, valeur]) => {
-                doc.setFont(undefined, 'normal');
-                doc.setTextColor(90, 90, 90);
+                doc.setFont(undefined, 'italic');
+                doc.setTextColor(0, 0, 0);
                 doc.text(label, xCommission + 3, yLigneCom);
-                doc.setFont(undefined, 'bold');
-                doc.setTextColor(15, 76, 129);
+                doc.setFont(undefined, 'bolditalic');
+                doc.setTextColor(0, 0, 0);
                 doc.text(valeur, xCommission + largeurCommission - 3, yLigneCom, { align: 'right' });
                 yLigneCom += 5.5;
             });
 
             doc.setDrawColor(15, 76, 129);
             doc.line(xCommission + 2, yLigneCom + 1, xCommission + largeurCommission - 2, yLigneCom + 1);
-            doc.setFont(undefined, 'bold');
+            doc.setFont(undefined, 'bolditalic');
             doc.setFontSize(8);
-            doc.setTextColor(15, 76, 129);
+            doc.setTextColor(0, 0, 0);
             doc.text('COMMISSION TOTAL DUE', xCommission + 3, yLigneCom + 6);
             doc.text(formatCurrency(t.totalCom + t.ecartClient) + ' FCFA', xCommission + largeurCommission - 3, yLigneCom + 6, { align: 'right' });
             doc.setTextColor(0, 0, 0);
 
             yCommission += hauteurBoxCommission;
 
-            y = Math.max(yReglement, yCommission) + 12;
+            y = Math.max(yReglement, yCommission) + 10;
 
             // ============================================
             // SIGNATURE — LA COMPTABILITE (bas de page, à droite)
             // ============================================
-            if (y + 22 > 285) {
+            if (y + 22 > basPageUtile) {
                 doc.addPage();
-                y = 20;
+                y = 15;
             }
-            const ySignature = Math.max(y, 255); // ancrée en bas de la dernière page si la place le permet
+            const ySignature = Math.max(y, 175); // ancrée en bas de la dernière page si la place le permet
             doc.setFont(undefined, 'bold');
             doc.setFontSize(9);
             doc.setTextColor(0, 0, 0);
             doc.text('LA COMPTABILITE', margeD, ySignature, { align: 'right' });
-            doc.setFont(undefined, 'normal');
+            doc.setFont(undefined, 'italic');
             doc.setFontSize(7);
-            doc.setTextColor(120, 120, 120);
+            doc.setTextColor(0, 0, 0);
             doc.text('(Signature et cachet)', margeD, ySignature + 5, { align: 'right' });
             doc.setDrawColor(150, 150, 150);
             doc.setLineWidth(0.2);
@@ -11346,6 +11340,16 @@
          * données au moment de la génération — un récap ne change pas si le BDX
          * source est modifié après coup).
          */
+        /**
+         * Détecte si le libellé d'un règlement/ajustement indique un "SURPLUS"
+         * (le client a réglé plus que dû — montant déjà inclus dans son chèque,
+         * PAS de l'argent supplémentaire reçu) plutôt qu'un "CHEQUE COMPLEMENTAIRE"
+         * (un vrai chèque/espèces additionnel reçu pour couvrir un manque).
+         */
+        function estLibelleSurplus(libelle) {
+            return !!(libelle && libelle.toUpperCase().includes('SURPLUS'));
+        }
+
         function construireLigneRecapDepuisBDX(b) {
             const totalPrimeNette = b.certificats.reduce((s, c) => s + (c.primeNette || 0), 0);
             const totalAccessoires = b.certificats.reduce((s, c) => s + (c.accessoires || 0), 0);
@@ -11358,6 +11362,14 @@
             const chequesAjustement = cheques.filter(ch => ch.estAjustement);
             const montantRecuClient = chequesClient.reduce((s, ch) => s + (ch.montant || 0), 0);
             const montantAjustement = chequesAjustement.reduce((s, ch) => s + (ch.montant || 0), 0);
+            // Un ajustement "SURPLUS" (le client a réglé plus que dû, montant déjà
+            // INCLUS dans son chèque) n'est pas de l'argent supplémentaire reçu — il
+            // reste affiché dans le détail, mais ne doit PAS entrer dans les totaux
+            // "reçu". Un "CHEQUE COMPLEMENTAIRE" (ou espèces) est lui un vrai montant
+            // additionnel reçu, donc il compte.
+            const montantAjustementComptabilise = chequesAjustement
+                .filter(ch => !estLibelleSurplus(ch.libelle))
+                .reduce((s, ch) => s + (ch.montant || 0), 0);
 
             return {
                 numeroBDX: b.numeroBDX,
@@ -11372,6 +11384,7 @@
                 montantRecu: montantRecuClient, // conservé pour compat. : seulement le règlement client
                 montantRecuClient: montantRecuClient,
                 montantAjustement: montantAjustement,
+                montantAjustementComptabilise: montantAjustementComptabilise,
                 totalPrimeNette: totalPrimeNette,
                 totalAccessoires: totalAccessoires,
                 totalTaxe: totalTaxe,
@@ -11541,7 +11554,7 @@
                 totalTaxe += l.totalTaxe;
                 totalPrimeTTC += l.totalPrimeTTC;
                 totalMontantRecu += l.montantRecuClient || 0; // règlement CLIENT uniquement
-                totalSurplusBDX += l.montantAjustement || 0; // ajustement de CE BDX (généralement fourni par PCA)
+                totalSurplusBDX += l.montantAjustementComptabilise || 0; // ajustements "CHEQUE COMPLEMENTAIRE" du BDX, hors "SURPLUS"
                 totalCommission += l.totalCommission;
             });
 
@@ -11549,7 +11562,7 @@
             document.getElementById('recapTotalAccessoires').textContent = formatCurrency(totalAccessoires);
             document.getElementById('recapTotalTaxe').textContent = formatCurrency(totalTaxe);
             document.getElementById('recapTotalPrimeTTC').textContent = formatCurrency(totalPrimeTTC);
-            document.getElementById('recapTotalMontantRecu').textContent = formatCurrency(totalMontantRecu);
+            document.getElementById('recapTotalMontantRecu').textContent = formatCurrency(totalMontantRecu + totalSurplusBDX);
             document.getElementById('recapTotalCommission').textContent = formatCurrency(totalCommission);
             document.getElementById('recapNbBDX').textContent = recapEnCours.lignes.length;
 
@@ -11565,18 +11578,24 @@
                 plage.textContent = `BDX ${numeros[0]} à BDX ${numeros[numeros.length - 1]}`;
             }
 
-            // TOTAL SURPLUS (bloc commission) = simple écart entre ce que le client a
-            // réellement réglé et la Prime TTC due — indépendant des ajustements déjà
-            // enregistrés BDX par BDX (ceux-ci restent visibles dans le tableau mais
-            // n'entrent plus dans ce calcul).
+            // TOTAL REÇU (bloc commission) = somme des chèques/espèces reçus du
+            // client pour le règlement de chaque BDX + somme des chèques/espèces
+            // complémentaires DÉJÀ ENREGISTRÉS DANS LES TABLEAUX DE CHAQUE BDX
+            // (via "⚖️ Ajouter l'ajustement" sur le BDX — pas un ajustement du récap
+            // lui-même) + l'éventuel chèque complémentaire global ajouté ici, en plus.
+            // TOTAL SURPLUS = TOTAL REÇU - TOTAL PRIME TTC.
             const totalChequesComplementaires = recapEnCours.chequesComplementaires.reduce((s, ch) => s + (ch.montant || 0), 0);
-            const totalSurplus = totalMontantRecu - totalPrimeTTC;
+            const totalRecu = totalMontantRecu + totalSurplusBDX + totalChequesComplementaires;
+            const totalSurplus = totalRecu - totalPrimeTTC;
 
-            // Montant suggéré / écart de réconciliation pour la ligne complémentaire
-            // AJOUTÉE PAR L'UTILISATEUR dans le bloc RÈGLEMENT (2e ligne) : sert à
-            // vérifier que ce qu'il saisit couvre bien le TOTAL SURPLUS ci-dessus.
-            const montantSuggere = Math.max(0, -totalSurplus);
-            const ecartReconciliation = (totalMontantRecu + totalChequesComplementaires) - totalPrimeTTC;
+            // Montant suggéré pour la ligne complémentaire AJOUTÉE PAR L'UTILISATEUR
+            // (2e ligne du bloc RÈGLEMENT) : calculé AVANT prise en compte de ce
+            // chèque complémentaire GLOBAL, mais APRÈS les ajustements déjà présents
+            // dans les BDX — pour indiquer s'il manque encore quelque chose.
+            const montantSuggere = Math.max(0, totalPrimeTTC - totalMontantRecu - totalSurplusBDX);
+            // L'écart de réconciliation est maintenant, par construction, identique
+            // au TOTAL SURPLUS ci-dessus (les deux comparent TOTAL REÇU à la Prime TTC).
+            const ecartReconciliation = totalSurplus;
 
             document.getElementById('recapMontantSuggereComplementaire').textContent = formatCurrency(montantSuggere) + ' FCFA';
 
@@ -11600,7 +11619,7 @@
                 `💰 Commission ${recapEnCours.garantieFamille === 'FAP SAUF' ? 'FAP SAUF' : 'TR'} PCA`;
             document.getElementById('recapComTotalPrimeHT').textContent = formatCurrency(totalPrimeNette) + ' FCFA';
             document.getElementById('recapComTotalPrimeTTC').textContent = formatCurrency(totalPrimeTTC) + ' FCFA';
-            document.getElementById('recapComTotalRecu').textContent = formatCurrency(totalMontantRecu) + ' FCFA';
+            document.getElementById('recapComTotalRecu').textContent = formatCurrency(totalRecu) + ' FCFA';
             document.getElementById('recapComTaux').textContent = taux + '%';
             document.getElementById('recapComTotalCom').textContent = formatCurrency(totalCommission) + ' FCFA';
             document.getElementById('recapComTotalSurplus').textContent = formatCurrency(totalSurplus) + ' FCFA';
@@ -11608,7 +11627,7 @@
 
             recapEnCours._totaux = {
                 totalPrimeNette, totalAccessoires, totalTaxe, totalPrimeTTC,
-                totalMontantRecu, totalSurplusBDX, totalChequesComplementaires, totalSurplus,
+                totalMontantRecu, totalSurplusBDX, totalChequesComplementaires, totalRecu, totalSurplus,
                 totalCommission, montantSuggere, ecartReconciliation, taux
             };
         }
@@ -11795,18 +11814,20 @@
                 }
             });
 
-            wsData.push(['Total général', '', '', '', '', '', t.totalMontantRecu, t.totalPrimeNette, t.totalAccessoires, t.totalTaxe, t.totalPrimeTTC, t.totalCommission]);
+            wsData.push(['Total général', '', '', '', '', '', t.totalMontantRecu + t.totalSurplusBDX, t.totalPrimeNette, t.totalAccessoires, t.totalTaxe, t.totalPrimeTTC, t.totalCommission]);
             wsData.push([]);
 
-            // Bloc RÈGLEMENT — 1) récapitulatif de TOUS les chèques/espèces du client
-            // (= TOTAL REÇU) ; 2) chèque(s) complémentaire(s)/surplus ajouté(s) par
-            // l'utilisateur, le cas échéant.
+            // Bloc RÈGLEMENT — 1) chèques/espèces des clients (BDX par BDX) ; 2)
+            // ajustements (surplus/complémentaire) DÉJÀ SAISIS DANS LES TABLEAUX DE
+            // CHAQUE BDX ; 3) éventuel chèque complémentaire global ajouté ici, en
+            // plus. La somme des trois = TOTAL REÇU (voir bloc commission plus bas).
             wsData.push(['RÈGLEMENT']);
-            wsData.push(['Total chèques/espèces clients (TOTAL REÇU)', '', '', '', '', '', t.totalMontantRecu]);
+            wsData.push(['Total chèques/espèces clients', '', '', '', '', '', t.totalMontantRecu]);
+            wsData.push(['Chèques/espèces complémentaires provenant des BDX', '', '', '', '', '', t.totalSurplusBDX]);
             recapEnCours.chequesComplementaires.forEach(ch => {
                 wsData.push([`${ch.libelle} N°${ch.numero}`, '', '', '', '', '', ch.montant]);
             });
-            wsData.push(['TOTAL DES RÈGLEMENTS', '', '', '', '', '', t.totalMontantRecu + t.totalChequesComplementaires]);
+            wsData.push(['TOTAL REÇU', '', '', '', '', '', t.totalRecu]);
             wsData.push(['Prime TTC à reverser à la compagnie', '', '', '', '', '', -t.totalPrimeTTC]);
             if (Math.abs(t.ecartReconciliation) >= 1) {
                 const libelle = t.ecartReconciliation > 0 ? 'SURPLUS' : 'MANQUE (chèque complémentaire insuffisant)';
@@ -11818,7 +11839,7 @@
             wsData.push([titreCommission]);
             wsData.push(['TOTAL PRIME HT', '', '', '', '', '', t.totalPrimeNette]);
             wsData.push(['TOTAL PRIME TTC', '', '', '', '', '', t.totalPrimeTTC]);
-            wsData.push(['TOTAL REÇU', '', '', '', '', '', t.totalMontantRecu]);
+            wsData.push(['TOTAL REÇU', '', '', '', '', '', t.totalRecu]);
             wsData.push(['TAUX COM', '', '', '', '', '', taux / 100]);
             wsData.push(['TOTAL COM', '', '', '', '', '', t.totalCommission]);
             wsData.push(['TOTAL SURPLUS', '', '', '', '', '', t.totalSurplus]);
@@ -11854,13 +11875,15 @@
             const margeG = 12;
             const margeD = 285;
             const largeur = margeD - margeG;
-            const margeHautLetterhead = 42;
+            // (v2.29) Seul le courrier de transmission est imprimé sur papier à
+            // en-tête — le récapitulatif est imprimé sur papier normal.
+            const margeHautLetterhead = 15;
             let y = margeHautLetterhead;
 
             function enteteRecap() {
-                doc.setTextColor(15, 76, 129);
+                doc.setTextColor(0, 0, 0);
                 doc.setFontSize(14);
-                doc.setFont(undefined, 'bold');
+                doc.setFont(undefined, 'bolditalic');
                 doc.text(`COMMISSIONS DUES P/C PREMIUM COURTAGE ASSUR — ${garantieFamille}`, (margeG + margeD) / 2, y, { align: 'center' });
                 y += 8;
 
@@ -11943,9 +11966,10 @@
                 doc.text(String(l.police || ''), colonnes[3].x + 1, y + 4.8, { maxWidth: colonnes[3].w - 2 });
                 doc.text(String(l.souscripteur || ''), colonnes[4].x + 1, y + 4.8, { maxWidth: colonnes[4].w - 2 });
                 if (numeroManquant) {
-                    doc.setTextColor(200, 80, 20);
-                    doc.text(chequeClientTxt + ' ⚠', colonnes[5].x + 1, y + 4.8, { maxWidth: colonnes[5].w - 2 });
+                    doc.setFont(undefined, 'italic');
                     doc.setTextColor(0, 0, 0);
+                    doc.text(chequeClientTxt + ' ⚠', colonnes[5].x + 1, y + 4.8, { maxWidth: colonnes[5].w - 2 });
+                    doc.setFont(undefined, 'normal');
                 } else {
                     doc.text(chequeClientTxt, colonnes[5].x + 1, y + 4.8, { maxWidth: colonnes[5].w - 2 });
                 }
@@ -11963,7 +11987,7 @@
                     doc.line(colonnes[5].x, y + 7, margeD, y + 7);
                     doc.setFont(undefined, 'italic');
                     doc.setFontSize(6);
-                    doc.setTextColor(180, 100, 30);
+                    doc.setTextColor(0, 0, 0);
                     doc.text(chequeAjustTxt, colonnes[5].x + 1, y + 9.5, { maxWidth: colonnes[5].w - 2 });
                     doc.text(formatCurrency(l.montantAjustement), colonnes[6].x + colonnes[6].w - 1, y + 9.5, { align: 'right' });
                     doc.setTextColor(0, 0, 0);
@@ -11975,14 +11999,14 @@
                 compteur++;
             });
 
-            // Ligne TOTAL GÉNÉRAL (chèques/espèces BDX uniquement dans cette colonne — voir bloc RÈGLEMENT pour le total combiné)
+            // Ligne TOTAL GÉNÉRAL (chèques clients + compléments BDX dans cette colonne, hors surplus — cohérent avec TOTAL REÇU du bloc RÈGLEMENT)
             doc.setFillColor(15, 76, 129);
             doc.rect(margeG, y, largeur, 8, 'F');
             doc.setTextColor(255, 255, 255);
             doc.setFont(undefined, 'bold');
             doc.setFontSize(8);
             doc.text('TOTAL GÉNÉRAL', colonnes[3].x + 1, y + 5.5);
-            doc.text(formatCurrency(t.totalMontantRecu), colonnes[6].x + colonnes[6].w - 1, y + 5.5, { align: 'right' });
+            doc.text(formatCurrency(t.totalMontantRecu + t.totalSurplusBDX), colonnes[6].x + colonnes[6].w - 1, y + 5.5, { align: 'right' });
             doc.text(formatCurrency(t.totalPrimeNette), colonnes[7].x + colonnes[7].w - 1, y + 5.5, { align: 'right' });
             doc.text(formatCurrency(t.totalAccessoires), colonnes[8].x + colonnes[8].w - 1, y + 5.5, { align: 'right' });
             doc.text(formatCurrency(t.totalTaxe), colonnes[9].x + colonnes[9].w - 1, y + 5.5, { align: 'right' });
@@ -12024,11 +12048,12 @@
                 yR += 6;
             }
 
-            ligneReglement('Total chèques/espèces clients (TOTAL REÇU)', t.totalMontantRecu, false);
+            ligneReglement('Total chèques/espèces clients', t.totalMontantRecu, false);
+            ligneReglement('Chèques/espèces complémentaires provenant des BDX', t.totalSurplusBDX, false);
             recapEnCours.chequesComplementaires.forEach(ch => {
                 ligneReglement(`${ch.libelle} N°${ch.numero}`, ch.montant, false);
             });
-            ligneReglement('TOTAL DES RÈGLEMENTS', t.totalMontantRecu + t.totalChequesComplementaires, true);
+            ligneReglement('TOTAL REÇU', t.totalRecu, true);
             ligneReglement('Prime TTC à reverser à la compagnie', -t.totalPrimeTTC, true);
 
             if (Math.abs(t.ecartReconciliation) >= 1) {
@@ -12037,9 +12062,9 @@
                 if (estSurplus) { doc.setFillColor(255, 243, 224); } else { doc.setFillColor(255, 235, 238); }
                 doc.rect(margeG, yR, largeurReglement, 7, 'F');
                 doc.rect(margeG, yR, largeurReglement, 7);
-                doc.setFont(undefined, 'bold');
+                doc.setFont(undefined, 'bolditalic');
                 doc.setFontSize(8);
-                doc.setTextColor(estSurplus ? 180 : 192, estSurplus ? 100 : 57, estSurplus ? 30 : 43);
+                doc.setTextColor(0, 0, 0);
                 doc.text(libelleAjustement, margeG + 3, yR + 4.8);
                 doc.text(formatCurrency(Math.abs(t.ecartReconciliation)) + ' FCFA', margeG + largeurReglement - 3, yR + 4.8, { align: 'right' });
                 doc.setTextColor(0, 0, 0);
@@ -12071,7 +12096,7 @@
             doc.rect(xCommission, yC, largeurCommission, hauteurBoxCommission, 'FD');
 
             const champsCommission = [
-                ['TOTAL REÇU', formatCurrency(t.totalMontantRecu) + ' FCFA'],
+                ['TOTAL REÇU', formatCurrency(t.totalRecu) + ' FCFA'],
                 ['TAUX DE COMMISSION', taux + '%'],
                 ['TOTAL COMMISSION', formatCurrency(t.totalCommission) + ' FCFA'],
                 ['TOTAL SURPLUS', formatCurrency(t.totalSurplus) + ' FCFA']
@@ -12079,20 +12104,20 @@
             doc.setFontSize(7.5);
             let yLigneCom = yC + 6;
             champsCommission.forEach(([label, valeur]) => {
-                doc.setFont(undefined, 'normal');
-                doc.setTextColor(90, 90, 90);
+                doc.setFont(undefined, 'italic');
+                doc.setTextColor(0, 0, 0);
                 doc.text(label, xCommission + 3, yLigneCom);
-                doc.setFont(undefined, 'bold');
-                doc.setTextColor(15, 76, 129);
+                doc.setFont(undefined, 'bolditalic');
+                doc.setTextColor(0, 0, 0);
                 doc.text(valeur, xCommission + largeurCommission - 3, yLigneCom, { align: 'right' });
                 yLigneCom += 5.5;
             });
 
             doc.setDrawColor(15, 76, 129);
             doc.line(xCommission + 2, yLigneCom + 1, xCommission + largeurCommission - 2, yLigneCom + 1);
-            doc.setFont(undefined, 'bold');
+            doc.setFont(undefined, 'bolditalic');
             doc.setFontSize(8);
-            doc.setTextColor(15, 76, 129);
+            doc.setTextColor(0, 0, 0);
             doc.text('COMMISSION TOTAL DUE', xCommission + 3, yLigneCom + 6);
             doc.text(formatCurrency(t.totalCommission + t.totalSurplus) + ' FCFA', xCommission + largeurCommission - 3, yLigneCom + 6, { align: 'right' });
             doc.setTextColor(0, 0, 0);
@@ -12117,9 +12142,9 @@
             doc.setFontSize(9);
             doc.setTextColor(0, 0, 0);
             doc.text('VISA GNA', margeD - largeurVisa + 4, yVisa + 6);
-            doc.setFont(undefined, 'normal');
+            doc.setFont(undefined, 'italic');
             doc.setFontSize(7);
-            doc.setTextColor(120, 120, 120);
+            doc.setTextColor(0, 0, 0);
             doc.text('Nom, signature et cachet', margeD - largeurVisa + 4, yVisa + 11);
             doc.text('Date : ____ / ____ / ________', margeD - largeurVisa + 4, yVisa + 19);
             doc.setTextColor(0, 0, 0);
