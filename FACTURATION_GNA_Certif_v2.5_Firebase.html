@@ -12276,10 +12276,7 @@
             }
             recalculerRecap();
 
-            const numerosBDX = recapEnCours.lignes.map(l => l.numeroBDX);
-            const premier = numerosBDX[0];
-            const dernier = numerosBDX[numerosBDX.length - 1];
-            document.getElementById('courrierObjet').value = `Des BDX ${recapEnCours.garantieFamille} N°${premier} AU BDX N°${dernier}`;
+            document.getElementById('courrierObjet').value = `Transmission de règlements et demande de commission — Garantie ${recapEnCours.garantieFamille}`;
             document.getElementById('courrierDate').value = new Date().toISOString().substring(0, 10);
             document.getElementById('courrierDestinataire').value = '';
             document.getElementById('courrierCompagnie').value = 'GNA';
@@ -12300,104 +12297,143 @@
         function genererCourrierWordRecap() {
             const t = recapEnCours._totaux;
             const dateCourrier = formatDateAffichage(document.getElementById('courrierDate').value);
-            const destinataire = document.getElementById('courrierDestinataire').value.trim() || '___________';
+            const destinataire = document.getElementById('courrierDestinataire').value.trim();
             const compagnie = document.getElementById('courrierCompagnie').value.trim() || 'GNA';
             const objet = document.getElementById('courrierObjet').value.trim();
             const signataire = document.getElementById('courrierSignataire').value.trim();
 
+            // Référence BDX calculée automatiquement (même format que partout ailleurs
+            // dans l'application) — n'est plus mélangée au champ Objet, qui reste libre.
+            const numerosBDX = recapEnCours.lignes.map(l => l.numeroBDX);
+            const plageBDX = numerosBDX.length === 1 ? `BDX N°${numerosBDX[0]}`
+                : numerosBDX.length === 2 ? `BDX N°${numerosBDX[0]} et N°${numerosBDX[1]}`
+                : `BDX N°${numerosBDX[0]} à N°${numerosBDX[numerosBDX.length - 1]}`;
+
             const nbChequesClients = recapEnCours.lignes.reduce((s, l) => s + l.chequesClient.length, 0);
             const montantChequesClients = t.totalMontantRecu;
+            const nbAjustementsBDX = recapEnCours.lignes.reduce((s, l) => s + l.chequesAjustement.length, 0);
+            const montantAjustementsBDX = t.totalSurplusBDX;
             const nbChequesComplementaires = recapEnCours.chequesComplementaires.length;
             const montantChequesComplementaires = t.totalChequesComplementaires;
-            const totalCheques = montantChequesClients + montantChequesComplementaires;
+            const totalRemis = montantChequesClients + montantAjustementsBDX + montantChequesComplementaires;
             const surplus = t.ecartReconciliation > 0 ? t.ecartReconciliation : 0;
             const manque = t.ecartReconciliation < 0 ? -t.ecartReconciliation : 0;
+            const nbTotalReglements = nbChequesClients + nbAjustementsBDX + nbChequesComplementaires;
 
-            const ligneComplementaire = recapEnCours.chequesComplementaires.length > 0
+            const libelleComplementaires = recapEnCours.chequesComplementaires.length > 0
                 ? recapEnCours.chequesComplementaires.map(ch => ch.libelle).join(', ')
-                : 'CHEQUE COMPLEMENTAIRE';
+                : 'Chèque(s) complémentaire(s)';
 
             const html = `
                 <html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-                <head><meta charset='utf-8'><title>Courrier de transmission</title></head>
-                <body style="font-family: Calibri, Arial, sans-serif; font-size: 12pt; margin: 40px 60px 40px 60px;">
-                    <div style="height: 90px;"><!-- Zone laissée libre pour le papier à en-tête --></div>
+                <head>
+                    <meta charset='utf-8'><title>Courrier de transmission</title>
+                    <style>
+                        /* Word respecte la règle @page pour les marges de la page, pas la
+                        directive XML w:PageMargin — c'est cette règle qui compte vraiment. */
+                        @page { size: 21cm 29.7cm; margin: 1.6cm 2cm 1.5cm 2cm; }
+                        /* Word applique par défaut un retrait de gauche à ses paragraphes
+                        "Normal" (~1,2cm) qui n'a pas d'équivalent à droite : ça donne
+                        l'impression que tout le contenu est décalé vers la droite par
+                        rapport aux tableaux. On le neutralise explicitement ici. */
+                        p, p.MsoNormal, div { margin: 0; margin-left: 0 !important; text-indent: 0; }
+                        body { margin: 0; }
+                    </style>
+                </head>
+                <body style="font-family: Calibri, Arial, sans-serif; font-size: 10.5pt; color:#1a1a1a; line-height: 1.25; margin: 0;">
+                    <div style="height: 65px;"><!-- Zone laissée libre pour le papier à en-tête --></div>
 
-                    <p style="text-align:right; margin-bottom: 30px;">${dateCourrier}</p>
+                    <p style="text-align:right; margin: 0 0 16px 0;">Abidjan, le ${dateCourrier}</p>
 
-                    <p><u>Objet</u> / Transmission de règlements et demande de commissions assurance maritime<br>
-                    <strong>${escapeHtml(objet)}</strong></p>
+                    <p style="margin: 0 0 10px 0;">
+                        <strong>${escapeHtml(compagnie)}</strong>${destinataire ? `<br>À l'attention de ${escapeHtml(destinataire)}` : ''}
+                    </p>
 
-                    <p style="text-align:center; margin-top: 25px;"><u><strong>A L'AIMABLE ATTENTION DE ${escapeHtml(destinataire)}</strong></u></p>
+                    <p style="margin: 0 0 2px 0;"><strong>Réf. :</strong> ${escapeHtml(plageBDX)} — Garantie ${escapeHtml(recapEnCours.garantieFamille)}</p>
+                    <p style="margin: 0 0 12px 0;"><strong>Objet :</strong> ${escapeHtml(objet)}</p>
 
-                    <p style="margin-top: 25px;">Monsieur,</p>
+                    <p style="margin: 0 0 8px 0;">${(() => {
+                        const d = destinataire.toUpperCase();
+                        if (/^MME|MADAME/.test(d)) return 'Madame,';
+                        if (/^M\.|MR|MONSIEUR/.test(d)) return 'Monsieur,';
+                        return 'Monsieur, Madame,';
+                    })()}</p>
 
-                    <p>Veuillez trouver ci-joint les chèques d'un montant total de <strong>${formatCurrency(totalCheques)}</strong> Francs CFA.</p>
+                    <p style="margin: 0 0 10px 0;">Nous vous prions de trouver ci-joint le règlement des bordereaux référencés ci-dessus, sous forme de ${nbTotalReglements} règlement${nbTotalReglements > 1 ? 's' : ''}${montantChequesComplementaires > 0 || montantAjustementsBDX > 0 ? ' (chèques clients et compléments)' : ''}, pour un montant total remis de <strong>${formatCurrency(totalRemis)} Francs CFA</strong>.</p>
 
-                    <table border="1" cellpadding="6" cellspacing="0" style="width:100%; border-collapse: collapse; margin-top: 15px;">
-                        <tr style="font-weight:bold;">
-                            <td>DETAILS DES BDX</td>
-                            <td style="text-align:center;">NOMBRE DE CHÈQUES</td>
-                            <td style="text-align:center;">MONTANTS CHÈQUES</td>
-                            <td style="text-align:center;">ESPÈCES</td>
+                    <table cellpadding="4" cellspacing="0" style="width:100%; border-collapse: collapse; margin: 0 0 10px 0; font-size: 10.5pt;">
+                        <tr style="background:#0f4c81; color:#ffffff;">
+                            <td style="border:1.5px solid #000;">Détail du règlement</td>
+                            <td style="border:1.5px solid #000; text-align:center;">Nb</td>
+                            <td style="border:1.5px solid #000; text-align:right;">Montant (FCFA)</td>
                         </tr>
                         <tr>
-                            <td>CHEQUE CLIENTS</td>
-                            <td style="text-align:center;">${nbChequesClients}</td>
-                            <td style="text-align:right;">${formatCurrency(montantChequesClients)}</td>
-                            <td style="text-align:center;">0</td>
+                            <td style="border:1.5px solid #000;">Chèques / espèces clients</td>
+                            <td style="border:1.5px solid #000; text-align:center;">${nbChequesClients}</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(montantChequesClients)}</td>
                         </tr>
+                        ${nbAjustementsBDX > 0 ? `
+                        <tr>
+                            <td style="border:1.5px solid #000;">Compléments provenant des BDX</td>
+                            <td style="border:1.5px solid #000; text-align:center;">${nbAjustementsBDX}</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(montantAjustementsBDX)}</td>
+                        </tr>` : ''}
                         ${nbChequesComplementaires > 0 ? `
                         <tr>
-                            <td>${escapeHtml(ligneComplementaire)}</td>
-                            <td style="text-align:center;">${nbChequesComplementaires}</td>
-                            <td style="text-align:right;">${formatCurrency(montantChequesComplementaires)}</td>
-                            <td></td>
+                            <td style="border:1.5px solid #000;">${escapeHtml(libelleComplementaires)}</td>
+                            <td style="border:1.5px solid #000; text-align:center;">${nbChequesComplementaires}</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(montantChequesComplementaires)}</td>
                         </tr>` : ''}
-                        <tr style="font-weight:bold;">
-                            <td>TOTAL DES CHÈQUES</td>
-                            <td style="text-align:center;">${nbChequesClients + nbChequesComplementaires}</td>
-                            <td style="text-align:right;">${formatCurrency(totalCheques)}</td>
-                            <td></td>
+                        <tr style="font-weight:bold; background:#f0f4f8;">
+                            <td style="border:1.5px solid #000;">Total remis</td>
+                            <td style="border:1.5px solid #000; text-align:center;">${nbTotalReglements}</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(totalRemis)}</td>
                         </tr>
                         <tr>
-                            <td>MONTANT A REVERSER</td>
-                            <td colspan="3" style="text-align:right;">-${formatCurrency(t.totalPrimeTTC)}</td>
+                            <td style="border:1.5px solid #000;" colspan="2">Prime TTC à reverser à la compagnie</td>
+                            <td style="border:1.5px solid #000; text-align:right;">− ${formatCurrency(t.totalPrimeTTC)}</td>
                         </tr>
                         ${surplus > 0 ? `
                         <tr>
-                            <td>SURPLUS CHÈQUE</td>
-                            <td colspan="3" style="text-align:right;">${formatCurrency(surplus)}</td>
+                            <td style="border:1.5px solid #000;" colspan="2">Surplus chèque</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(surplus)}</td>
                         </tr>` : ''}
                         ${manque > 0 ? `
                         <tr>
-                            <td>MANQUE</td>
-                            <td colspan="3" style="text-align:right;">-${formatCurrency(manque)}</td>
+                            <td style="border:1.5px solid #000;" colspan="2">Manque (chèque complémentaire à prévoir)</td>
+                            <td style="border:1.5px solid #000; text-align:right;">− ${formatCurrency(manque)}</td>
                         </tr>` : ''}
                     </table>
 
-                    <p style="margin-top: 25px;">Dans l'attente,<br>Nos cordiales salutations</p>
+                    <p style="margin: 0 0 6px 0;">Nous restons dans l'attente du règlement de nos commissions, calculées comme suit :</p>
 
-                    <table border="1" cellpadding="6" cellspacing="0" style="width:60%; border-collapse: collapse; margin-top: 20px;">
-                        <tr style="font-weight:bold;">
-                            <td></td>
-                            <td style="text-align:center;">TAUX COM</td>
-                            <td style="text-align:center;">MONTANT</td>
+                    <table cellpadding="4" cellspacing="0" style="width:100%; border-collapse: collapse; margin: 0 0 14px 0; font-size: 10.5pt;">
+                        <tr style="background:#0f4c81; color:#ffffff;">
+                            <td style="border:1.5px solid #000;">Garantie</td>
+                            <td style="border:1.5px solid #000; text-align:center;">Taux</td>
+                            <td style="border:1.5px solid #000; text-align:right;">Montant (FCFA)</td>
                         </tr>
                         <tr>
-                            <td>${escapeHtml(recapEnCours.garantieFamille)}</td>
-                            <td style="text-align:center;">${t.taux}%</td>
-                            <td style="text-align:right;">${formatCurrency(t.totalCommission)}</td>
+                            <td style="border:1.5px solid #000;">${escapeHtml(recapEnCours.garantieFamille)}</td>
+                            <td style="border:1.5px solid #000; text-align:center;">${t.taux}%</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(t.totalCommission)}</td>
                         </tr>
-                        <tr style="font-weight:bold;">
-                            <td colspan="2">TOTAL COMMISSIONS PREMIUM ${escapeHtml(recapEnCours.garantieFamille)}${surplus > 0 ? ' ET SURPLUS CHÈQUE' : ''}</td>
-                            <td style="text-align:right;">${formatCurrency(t.totalCommission + surplus)}</td>
+                        ${surplus > 0 ? `
+                        <tr>
+                            <td style="border:1.5px solid #000;" colspan="2">Surplus chèque</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(surplus)}</td>
+                        </tr>` : ''}
+                        <tr style="font-weight:bold; background:#f0f4f8;">
+                            <td style="border:1.5px solid #000;" colspan="2">Total commission demandée</td>
+                            <td style="border:1.5px solid #000; text-align:right;">${formatCurrency(t.totalCommission + surplus)}</td>
                         </tr>
                     </table>
 
-                    <div style="margin-top: 60px; display: flex; justify-content: space-between;">
-                        <div>${signataire ? escapeHtml(signataire) + '<br>(Signature)' : ''}</div>
-                        <div style="text-align:right;"><u>LA COMPTABILITE</u><br>(Signature et cachet)</div>
+                    <p style="margin: 0 0 30px 0;">Dans l'attente du règlement de nos commissions, nous vous prions d'agréer, Monsieur, Madame, l'expression de nos salutations distinguées.</p>
+
+                    <div style="text-align:right;">
+                        <strong>LA COMPTABILITÉ</strong>${signataire ? '<br>' + escapeHtml(signataire) : ''}<br>
+                        <span style="font-size: 9.5pt; color:#555;">(Signature et cachet)</span>
                     </div>
                 </body>
                 </html>
