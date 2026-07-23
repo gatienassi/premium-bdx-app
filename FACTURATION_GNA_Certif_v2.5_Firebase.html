@@ -1644,6 +1644,15 @@
                         </button>
                         <input type="file" id="inputImportFactureExterne" accept=".xlsx,.xls" style="display:none;" onchange="gererImportFactureExterne(event)">
                     </div>
+
+                    <div id="zoneDangerReset" style="display:none; border: 1px dashed #c0392b; border-radius: 8px; padding: 10px; margin-top: 14px; background:#fff5f5;">
+                        <div style="font-size: 11px; color: #c0392b; margin-bottom: 8px; font-weight:600;">
+                            ⚠️ Zone admin — avant mise en service par l'équipe
+                        </div>
+                        <button class="btn" onclick="reinitialiserDonneesTestRegistre()" style="width: 100%; font-size: 12px; background:#c0392b; color:white; border:none;" title="Supprime les factures, BDX et récapitulatifs de test — n'affecte pas l'historique mensuel">
+                            🗑️ Réinitialiser (factures/BDX/récaps de test)
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Section Recherche -->
@@ -2411,6 +2420,12 @@
             'laure@premium.com': 'utilisateur'
         };
 
+        // Code de confirmation exigé avant la réinitialisation des données de test
+        // (voir reinitialiserDonneesTestRegistre) — à changer ici si vous voulez un
+        // autre code. Sert de garde-fou supplémentaire même si le bouton lui-même
+        // n'est déjà visible que pour un compte admin.
+        const CODE_RESET_REGISTRE_GNA = 'PCA-RESET-2026';
+
         let utilisateurConnecteGNA = null;
         let roleUtilisateurGNA = null;
         let firebaseDbGNA = null;
@@ -2453,7 +2468,17 @@
             verifierRappelBackup();
             demanderStockagePersistant();
             verifierQuotaLocalStorage();
+            appliquerVisibiliteAdminGNA();
             console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateurGNA}`);
+        }
+
+        /**
+         * Affiche ou masque les actions réservées à l'administrateur (ex : zone de
+         * réinitialisation des données de test) selon le rôle de la personne connectée.
+         */
+        function appliquerVisibiliteAdminGNA() {
+            const zone = document.getElementById('zoneDangerReset');
+            if (zone) zone.style.display = (roleUtilisateurGNA === 'admin') ? 'block' : 'none';
         }
 
         /**
@@ -2897,6 +2922,7 @@
                 verifierRappelBackup();
                 demanderStockagePersistant();
                 verifierQuotaLocalStorage();
+                appliquerVisibiliteAdminGNA();
                 console.log(`✅ Session restaurée : ${emailSauvegarde}`);
             }
         });
@@ -3291,6 +3317,21 @@
 
                     request.onsuccess = () => resolve(true);
                     request.onerror = () => reject(request.error);
+                });
+            }
+
+            /**
+             * Vide entièrement un store donné (générique) — utilisé notamment pour la
+             * réinitialisation des données de test (factures/BDX/récaps), sans toucher
+             * aux autres stores (historique, config, etc.).
+             */
+            async clearStore(nomStore) {
+                await this.initPromise;
+                return new Promise((resolve, reject) => {
+                    const tx = this.db.transaction([nomStore], 'readwrite');
+                    tx.objectStore(nomStore).clear();
+                    tx.oncomplete = () => resolve(true);
+                    tx.onerror = () => reject(tx.error);
                 });
             }
 
@@ -9754,6 +9795,79 @@
             const elB = document.getElementById('nbBDXCrees');
             if (elF) elF.textContent = nbFactures;
             if (elB) elB.textContent = nbBDX;
+        }
+
+        /**
+         * Réinitialisation des données de test (admin uniquement) — supprime TOUTES
+         * les factures validées, BDX de règlement et récapitulatifs du Registre
+         * (locaux + cloud partagé), pour repartir propre avant la mise en service par
+         * l'équipe. NE TOUCHE PAS à l'historique mensuel (module de facturation
+         * d'origine), ni à la configuration des polices.
+         */
+        async function reinitialiserDonneesTestRegistre() {
+            if (roleUtilisateurGNA !== 'admin') {
+                alert('⛔ Seul un administrateur peut réinitialiser ces données.');
+                return;
+            }
+
+            const nbFactures = Object.keys(FACTURES_VALIDEES).length;
+            const nbBDX = Object.keys(BDX_REGLEMENTS).length;
+            const nbRecaps = Object.keys(RECAPITULATIFS_BDX).length;
+
+            if (nbFactures === 0 && nbBDX === 0 && nbRecaps === 0) {
+                alert('ℹ️ Le registre est déjà vide — rien à réinitialiser.');
+                return;
+            }
+
+            const confirmation1 = confirm(
+                `🔴 RÉINITIALISATION DES DONNÉES DE TEST\n\n` +
+                `Ceci va supprimer DÉFINITIVEMENT, pour TOUT LE MONDE (y compris vos collègues via le cloud partagé) :\n` +
+                `  • ${nbFactures} facture(s) validée(s)\n` +
+                `  • ${nbBDX} BDX de règlement\n` +
+                `  • ${nbRecaps} récapitulatif(s)\n\n` +
+                `L'HISTORIQUE MENSUEL et la CONFIGURATION DES POLICES ne sont PAS touchés.\n\n` +
+                `Cette action est IRRÉVERSIBLE. Continuer ?`
+            );
+            if (!confirmation1) return;
+
+            const saisie = prompt('🔐 Code de confirmation requis pour réinitialiser :');
+            if (saisie === null) return; // annulé par l'utilisateur
+            if (saisie.trim() !== CODE_RESET_REGISTRE_GNA) {
+                alert('❌ Code incorrect — réinitialisation annulée.');
+                return;
+            }
+
+            try {
+                // 1) Vider les stores IndexedDB locaux
+                await Promise.all([
+                    DB.clearStore('facturesValidees'),
+                    DB.clearStore('bdxReglements'),
+                    DB.clearStore('recapitulatifs')
+                ]);
+
+                // 2) Vider le cloud partagé (Firebase) pour que les collègues ne
+                // resynchronisent pas ces données au prochain chargement
+                if (firebaseDbGNA) {
+                    await Promise.all([
+                        firebaseDbGNA.ref('facturationGNA/facturesValidees').remove(),
+                        firebaseDbGNA.ref('facturationGNA/bdxReglements').remove(),
+                        firebaseDbGNA.ref('facturationGNA/recapitulatifs').remove()
+                    ]);
+                }
+
+                // 3) Vider la mémoire et rafraîchir l'affichage
+                FACTURES_VALIDEES = {};
+                BDX_REGLEMENTS = {};
+                RECAPITULATIFS_BDX = {};
+                facturesSelectionneesRegistre.clear();
+                mettreAJourInfoRegistre();
+                if (document.getElementById('tbodyRegistreFactures')) afficherRegistreFactures(1);
+
+                alert(`✅ Réinitialisation terminée : ${nbFactures} facture(s), ${nbBDX} BDX et ${nbRecaps} récapitulatif(s) supprimés — pour vous et vos collègues.`);
+            } catch (error) {
+                console.error('❌ Erreur lors de la réinitialisation :', error);
+                alert('⚠️ Une erreur est survenue pendant la réinitialisation. Vérifiez la console (F12).\n\n' + error.message);
+            }
         }
 
         // ------------------------------------------------------------
