@@ -10783,8 +10783,12 @@
                 ligneAjustement.innerHTML = `CHEQUE/ESPÈCES COMPLÉMENTAIRE À PRÉVOIR&nbsp; : &nbsp;${formatCurrency(-ecart)} FCFA — utilisez "⚖️ Ajouter l'ajustement" pour l'enregistrer`;
             }
 
+            // TOTAL REÇU (bloc commission) = chèques/espèces du client + chèques
+            // complémentaires (ex: "CHEQUE COMPLEMENTAIRE (avoir...)") — seuls les
+            // ajustements de type "SURPLUS" en sont exclus, exactement la même règle
+            // que celle appliquée au récapitulatif (voir estLibelleSurplus).
             const totalRecuClient = bdxEnCours.cheques
-                .filter(ch => !ch.estAjustement)
+                .filter(ch => !ch.estAjustement || !estLibelleSurplus(ch.libelle))
                 .reduce((s, ch) => s + (ch.montant || 0), 0);
             const ecartClient = totalRecuClient - totalPrimeTTC;
 
@@ -10803,21 +10807,28 @@
             document.getElementById('bdxComTotalSurplus').textContent = formatCurrency(ecartClient) + ' FCFA';
             document.getElementById('bdxComTotalDue').textContent = formatCurrency(totalCom + ecartClient) + ' FCFA';
 
-            // --- Avoir police (v2.38) : si la police a un avoir accordé par le
-            // cabinet, le client règle net de cet avoir — le cabinet doit fournir un
-            // chèque complémentaire du montant de l'avoir pour que la compagnie
-            // reçoive bien la Prime TTC complète. On calcule ce montant et on
-            // propose de l'ajouter directement comme un vrai règlement (traçable),
-            // plutôt que de fausser artificiellement le TOTAL SURPLUS.
+            // --- Avoir police (v2.38, affiné v2.43) : si la police a un avoir accordé
+            // par le cabinet, le client règle net de cet avoir — le cabinet doit fournir
+            // un chèque complémentaire du montant de l'avoir pour que la compagnie
+            // reçoive bien la Prime TTC complète. Un même BDX peut regrouper PLUSIEURS
+            // factures réglées par PLUSIEURS chèques séparés : le bouton reste donc
+            // disponible après un premier ajout, et propose chaque fois le montant
+            // RESTANT non encore couvert (et non le même total répété en boucle).
             const policeActuelle = document.getElementById('bdxPolice').value.trim();
-            const montantAvoir = calculerMontantAvoirBDX(policeActuelle, totalPrimeNette, totalPrimeTTC);
-            const dejaAjouteAvoir = bdxEnCours.cheques.some(ch => ch.estAjustement && ch.libelle && ch.libelle.startsWith('CHEQUE COMPLEMENTAIRE (avoir'));
+            const montantAvoirTotal = calculerMontantAvoirBDX(policeActuelle, totalPrimeNette, totalPrimeTTC);
+            const montantAvoirDejaAjoute = bdxEnCours.cheques
+                .filter(ch => ch.estAjustement && ch.libelle && ch.libelle.startsWith('CHEQUE COMPLEMENTAIRE (avoir'))
+                .reduce((s, ch) => s + (ch.montant || 0), 0);
+            const montantAvoirRestant = Math.max(0, montantAvoirTotal - montantAvoirDejaAjoute);
             const boutonAvoir = document.getElementById('bdxBoutonAvoir');
             const hintAvoir = document.getElementById('bdxHintAvoir');
-            if (montantAvoir > 0 && !dejaAjouteAvoir) {
+            if (montantAvoirRestant > 0) {
                 boutonAvoir.style.display = 'inline-block';
                 hintAvoir.style.display = 'block';
-                hintAvoir.innerHTML = `🔖 Cette police a un avoir accordé par le cabinet — montant suggéré du chèque complémentaire à sa charge : <strong>${formatCurrency(montantAvoir)} FCFA</strong>. Utilisez le bouton "🔖 Ajouter le chèque complémentaire (avoir)" ci-dessus pour l'enregistrer.`;
+                const dejaTexte = montantAvoirDejaAjoute > 0
+                    ? ` (${formatCurrency(montantAvoirDejaAjoute)} FCFA déjà ajoutés — utile si plusieurs factures/chèques distincts pour cette police)`
+                    : '';
+                hintAvoir.innerHTML = `🔖 Cette police a un avoir accordé par le cabinet — montant restant suggéré du chèque complémentaire à sa charge : <strong>${formatCurrency(montantAvoirRestant)} FCFA</strong>${dejaTexte}. Utilisez le bouton "🔖 Ajouter le chèque complémentaire (avoir)" ci-dessus pour l'enregistrer (répétez l'opération si plusieurs chèques distincts sont nécessaires).`;
             } else {
                 boutonAvoir.style.display = 'none';
                 hintAvoir.style.display = 'none';
@@ -10842,9 +10853,11 @@
         }
 
         /**
-         * Ajoute le chèque complémentaire correspondant à l'avoir de la police,
-         * avec le montant suggéré déjà calculé — modifiable avant enregistrement
-         * comme n'importe quelle autre ligne de règlement.
+         * Ajoute un chèque complémentaire correspondant au MONTANT RESTANT de l'avoir
+         * de la police (montant total de l'avoir moins ce qui a déjà été ajouté) —
+         * modifiable avant enregistrement comme n'importe quelle autre ligne de
+         * règlement. Peut être utilisé plusieurs fois sur un même BDX si celui-ci
+         * regroupe plusieurs factures réglées par plusieurs chèques distincts.
          */
         function ajouterChequeComplementaireAvoirBDX() {
             const t = bdxEnCours._totaux;
@@ -10854,16 +10867,20 @@
             if (config && config.avoir_conditionnel && t.totalPrimeTTC >= config.avoir_conditionnel.seuil) {
                 avoirPct = config.avoir_conditionnel.pct;
             }
-            const montantAvoir = calculerMontantAvoirBDX(policeActuelle, t.totalPrimeNette, t.totalPrimeTTC);
-            if (montantAvoir <= 0) {
-                alert('ℹ️ Aucun avoir détecté pour cette police.');
+            const montantAvoirTotal = calculerMontantAvoirBDX(policeActuelle, t.totalPrimeNette, t.totalPrimeTTC);
+            const montantAvoirDejaAjoute = bdxEnCours.cheques
+                .filter(ch => ch.estAjustement && ch.libelle && ch.libelle.startsWith('CHEQUE COMPLEMENTAIRE (avoir'))
+                .reduce((s, ch) => s + (ch.montant || 0), 0);
+            const montantRestant = Math.max(0, montantAvoirTotal - montantAvoirDejaAjoute);
+            if (montantRestant <= 0) {
+                alert('ℹ️ Aucun avoir restant à couvrir pour cette police.');
                 return;
             }
             bdxEnCours.cheques.push({
                 mode: 'cheque',
                 libelle: `CHEQUE COMPLEMENTAIRE (avoir ${avoirPct}%)`,
                 numero: '',
-                montant: montantAvoir,
+                montant: montantRestant,
                 estAjustement: true
             });
             afficherChequesBDX();
@@ -11011,8 +11028,7 @@
 
             wsData.push(['RÈGLEMENT']);
             bdxEnCours.cheques.forEach(ch => {
-                const libelleMode = ch.mode === 'espece' ? 'ESPECES' : `${ch.libelle}${ch.numero ? ' N°' + ch.numero : ''}`;
-                wsData.push([libelleMode, , , , , , ch.montant]);
+                wsData.push([libelleReglement(ch), , , , , , ch.montant]);
             });
             if (bdxEnCours.cheques.length > 0 && Math.abs(t.ecart) >= 1) {
                 const libelleAjustement = t.ecart > 0 ? 'SURPLUS (suggestion, non saisi)' : 'MANQUE (chèque complémentaire suggéré, non saisi)';
@@ -11265,7 +11281,7 @@
                     doc.rect(margeG, yReglement, largeurReglement, 6);
                     doc.setFontSize(7.5);
                     doc.setFont(undefined, 'normal');
-                    const libelleMode = ch.mode === 'espece' ? `ESPECES${ch.libelle ? ' - ' + ch.libelle : ''}` : `${ch.libelle}${ch.numero ? ' N°' + ch.numero : ''}`;
+                    const libelleMode = libelleReglement(ch);
                     doc.text(libelleMode, margeG + 3, yReglement + 4, { maxWidth: largeurReglement - 45 });
                     doc.text(formatCurrency(ch.montant) + ' FCFA', margeG + largeurReglement - 3, yReglement + 4, { align: 'right' });
                     yReglement += 6;
@@ -11513,10 +11529,26 @@
             recapEnCours = null;
         }
 
-        /** Libellé d'affichage d'un règlement (chèque ou espèces), réutilisé partout. */
+        /**
+         * Libellé d'affichage compact d'un règlement (chèque ou espèces), réutilisé
+         * partout (écran, Excel, PDF). Les libellés bruts ("CHEQUE COMPLEMENTAIRE
+         * (avoir 15%) N°0000447") sont trop longs pour les colonnes étroites du BDX
+         * et du récap et provoquaient un retour à la ligne qui chevauchait la ligne
+         * suivante — on retire les mots redondants ("CHEQUE" répété partout) et on
+         * abrège "avoir X%" sans perdre l'information essentielle.
+         */
         function libelleReglement(ch) {
-            if (ch.mode === 'espece') return `ESPECES${ch.libelle ? ' - ' + ch.libelle : ''}`;
-            return `${ch.libelle}${ch.numero ? ' N°' + ch.numero : ''}`;
+            let base = (ch.libelle || '').trim();
+            base = base
+                .replace(/CHEQUE\s+COMPLEMENTAIRE\s*\(\s*avoir\s*(\d+(?:[.,]\d+)?)\s*%\s*\)/i, 'COMPL. $1%')
+                .replace(/^CHEQUE\s+COMPLEMENTAIRE\s*$/i, 'COMPL.')
+                .replace(/^SURPLUS\s+CHEQUE\s*$/i, 'SURPLUS')
+                .replace(/^CHEQUE\s+/i, ''); // "CHEQUE BNI" -> "BNI" : le nom de banque suffit
+            const numero = ch.numero ? ' N°' + ch.numero : '';
+            if (ch.mode === 'espece') {
+                return base ? `ESPECES - ${base}${numero}` : `ESPECES${numero}`;
+            }
+            return `${base}${numero}`;
         }
 
         /**
