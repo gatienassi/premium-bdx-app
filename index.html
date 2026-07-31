@@ -722,6 +722,9 @@
     </style>
     <!-- Bibliothèque pour génération Word -->
     <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
+    <!-- ✅ v3.0.10 : Bibliothèques PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <!-- ÉCRAN LOGIN -->
@@ -1218,6 +1221,7 @@
                                 <option value="a_recevoir">À recevoir</option>
                                 <option value="recues">Reçues</option>
                                 <option value="retard">En retard (>60j)</option>
+                            <option value="archivees">Archivées</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -1234,6 +1238,33 @@
 
                 <!-- TABLEAU COMMISSIONS -->
                 <h3 style="color: var(--primary); margin-bottom: 15px;">📋 Suivi Commissions</h3>
+                
+                <!-- ✅ v3.0.9 : BOUTONS ACTIONS COMMISSIONS -->
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <button class="btn" onclick="genererPDFCommissions()" style="background-color: #dc2626; color: white;">
+                        📥 Télécharger PDF (Non réglées)
+                    </button>
+                    <button class="btn" onclick="imprimerCommissions()" style="background-color: #2563eb; color: white;">
+                        🖨️ Imprimer (Non réglées)
+                    </button>
+                    <button class="btn" onclick="afficherFormulaireArchivage()" style="background-color: #f97316; color: white;">
+                        🗂️ Archiver Sélection
+                    </button>
+                </div>
+                
+                <!-- ✅ v3.0.9 : FORMULE ARCHIVAGE (CACHÉE) -->
+                <div id="formulaireArchivage" style="display: none; background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                    <h4 style="color: #d97706; margin: 0 0 10px 0;">🗂️ Archiver les commissions sélectionnées</h4>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn" onclick="archiverCommissionsSelectionnees()" style="background-color: #16a34a; color: white;">
+                            ✅ Confirmer l'archivage
+                        </button>
+                        <button class="btn" onclick="document.getElementById('formulaireArchivage').style.display='none'" style="background-color: #6b7280; color: white;">
+                            ❌ Annuler
+                        </button>
+                    </div>
+                </div>
+                
                 <div id="tableauFinance"></div>
 
                 <!-- PRÉVISIONS TRÉSORERIE -->
@@ -2200,7 +2231,16 @@
             const compagnie = document.getElementById('financeCompagnie').value;
             const maintenant = new Date();
             
-            let contratsAffiches = contrats.filter(c => c.regle && !c.archive);
+            // ✅ v3.0.9 : Ajouter filtre archivées
+            let contratsAffiches;
+            
+            if (statut === 'archivees') {
+                // Afficher SEULEMENT les commissions archivées
+                contratsAffiches = contrats.filter(c => c.commissionArchivee && c.regle);
+            } else {
+                // Afficher les commissions NON archivées
+                contratsAffiches = contrats.filter(c => c.regle && !c.archive && !c.commissionArchivee);
+            }
             
             if (compagnie) {
                 contratsAffiches = contratsAffiches.filter(c => c.compagnie === compagnie);
@@ -2222,6 +2262,248 @@
             afficherTableauFinance(contratsAffiches);
         }
 
+        // ✅ v3.0.9 : GESTION ARCHIVAGE COMMISSIONS
+        window.commissionsSelectionnees = new Set();
+        
+        function afficherFormulaireArchivage() {
+            if (commissionsSelectionnees.size === 0) {
+                alert('⚠️ Aucune commission sélectionnée');
+                return;
+            }
+            document.getElementById('formulaireArchivage').style.display = 'block';
+        }
+        
+        function archiverCommissionsSelectionnees() {
+            if (commissionsSelectionnees.size === 0) {
+                alert('⚠️ Aucune commission sélectionnée');
+                return;
+            }
+            
+            const nombreArchives = commissionsSelectionnees.size;
+            
+            if (confirm(`Archiver ${nombreArchives} commission(s) ?\n\nElles disparaîtront du suivi mais resteront dans l'historique.`)) {
+                contrats.forEach(c => {
+                    if (commissionsSelectionnees.has(c.id)) {
+                        c.commissionArchivee = true;  // ✅ Marquer comme archivée
+                    }
+                });
+                
+                console.log(`🗂️ v3.0.9 : Archivage de ${nombreArchives} commission(s)...`);
+                sauvegarderDonneesCloudImmediatement();  // Sauvegarder à Firebase
+                
+                commissionsSelectionnees.clear();
+                document.getElementById('formulaireArchivage').style.display = 'none';
+                filtrerFinance();  // Rafraîchir l'affichage
+                
+                console.log(`✅ v3.0.9 : ${nombreArchives} commission(s) archivée(s) et sauvegardées à Firebase`);
+                alert(`✅ ${nombreArchives} commission(s) archivée(s)`);
+            }
+        }
+        
+        function toggleCommissionSelectionnee(contratId) {
+            if (commissionsSelectionnees.has(contratId)) {
+                commissionsSelectionnees.delete(contratId);
+            } else {
+                commissionsSelectionnees.add(contratId);
+            }
+        }
+        
+        // ✅ v3.0.11 : HTML REGROUPÉ PAR COMPAGNIE AVEC DÉLAI
+        function genererPDFCommissions() {
+            const commissionsARecevoir = contrats.filter(c => c.regle && !c.commissionRecue && !c.commissionArchivee);
+            
+            if (commissionsARecevoir.length === 0) {
+                alert('⚠️ Aucune commission à recevoir');
+                return;
+            }
+            
+            console.log(`📥 v3.0.11 : Génération HTML regroupée par compagnie (${commissionsARecevoir.length} commissions)...`);
+            
+            // Regrouper par compagnie
+            const parCompagnie = {};
+            commissionsARecevoir.forEach(c => {
+                if (!parCompagnie[c.compagnie]) {
+                    parCompagnie[c.compagnie] = [];
+                }
+                parCompagnie[c.compagnie].push(c);
+            });
+            
+            const maintenant = new Date();
+            let html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Commissions à Recevoir - Premium Courtage Assur</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 40px; background: white; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #2563eb; padding-bottom: 20px; }
+        .header h1 { color: #2563eb; margin: 0; font-size: 24px; }
+        .header p { color: #64748b; margin: 5px 0 0 0; }
+        .compagnie-section { margin: 30px 0; page-break-inside: avoid; }
+        .compagnie-header { background-color: #dbeafe; padding: 12px; font-weight: bold; font-size: 14px; border-left: 4px solid #2563eb; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th { background-color: #f3f4f6; padding: 10px; text-align: left; font-weight: bold; border-bottom: 2px solid #2563eb; font-size: 12px; }
+        td { padding: 8px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .montant { text-align: right; }
+        .sous-total { background-color: #fef3c7; font-weight: bold; }
+        .total-general { background-color: #dbeafe; font-weight: bold; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💰 Commissions à Recevoir</h1>
+        <p>Premium Courtage Assur - ${new Date().toLocaleDateString('fr-FR')}</p>
+    </div>
+`;
+            
+            let totalGeneral = 0;
+            
+            // Parcourir chaque compagnie
+            Object.keys(parCompagnie).sort().forEach(compagnie => {
+                const commissions = parCompagnie[compagnie];
+                let totalCompagnie = 0;
+                
+                html += `
+    <div class="compagnie-section">
+        <div class="compagnie-header">🏢 ${compagnie}</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date Effet</th>
+                    <th>Client</th>
+                    <th>Type</th>
+                    <th>Prime TTC</th>
+                    <th>Commission</th>
+                    <th>Délai (j)</th>
+                </tr>
+            </thead>
+            <tbody>
+`;
+                
+                commissions.forEach(c => {
+                    const commission = c.commissionTotale || 0;
+                    totalCompagnie += commission;
+                    totalGeneral += commission;
+                    
+                    // Calculer délai
+                    let delai = '-';
+                    if (c.dateReglement) {
+                        delai = Math.floor((maintenant - new Date(c.dateReglement)) / (1000 * 60 * 60 * 24));
+                    }
+                    
+                    html += `
+                <tr>
+                    <td>${c.dateEffet ? new Date(c.dateEffet).toLocaleDateString('fr-FR') : '-'}</td>
+                    <td>${c.nomClient || c.client || '-'}</td>
+                    <td>${c.typeAssurance || '-'}</td>
+                    <td class="montant">${formatMontant(c.primeTTC || 0)}</td>
+                    <td class="montant">${formatMontant(commission)}</td>
+                    <td class="montant">${delai}</td>
+                </tr>
+`;
+                });
+                
+                html += `
+            </tbody>
+        </table>
+        <div style="text-align: right; margin-bottom: 20px; font-weight: bold; padding: 10px; background: #fef3c7;">
+            Sous-total ${compagnie} : <span class="montant">${formatMontant(totalCompagnie)}</span>
+        </div>
+    </div>
+`;
+            });
+            
+            html += `
+    <div class="total-general" style="text-align: right; padding: 15px; font-size: 16px;">
+        TOTAL GÉNÉRAL : ${formatMontant(totalGeneral)}
+    </div>
+    
+    <p style="margin-top: 40px; text-align: center; color: #64748b; font-size: 12px;">
+        Nombre total de commissions : ${commissionsARecevoir.length}
+    </p>
+</body>
+</html>
+`;
+            
+            // Télécharger en HTML
+            const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Commissions-ARecevoir-${new Date().toLocaleDateString('fr-FR')}.html`;
+            a.click();
+            
+            console.log(`✅ v3.0.11 : HTML regroupé par compagnie généré et téléchargé`);
+        }
+        
+        // ✅ v3.0.10 : IMPRIMER COMMISSIONS À RECEVOIR
+        function imprimerCommissions() {
+            // ✅ v3.0.10 : Filtre correct
+            const commissionsARecevoir = contrats.filter(c => c.regle && !c.commissionRecue && !c.commissionArchivee);
+            
+            if (commissionsARecevoir.length === 0) {
+                alert('⚠️ Aucune commission à imprimer');
+                return;
+            }
+            
+            let html = `
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Impression Commissions</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+        th { background-color: #ccc; font-weight: bold; }
+        .montant { text-align: right; }
+    </style>
+</head>
+<body>
+    <h2>Commissions à Recevoir - ${new Date().toLocaleDateString('fr-FR')}</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Client</th>
+                <th>Compagnie</th>
+                <th>Prime</th>
+                <th>Commission</th>
+                <th>Statut</th>
+            </tr>
+        </thead>
+        <tbody>
+`;
+            
+            commissionsARecevoir.forEach(c => {
+                html += `
+            <tr>
+                <td>${c.dateEffet || '-'}</td>
+                <td>${c.nomClient || c.client || '-'}</td>
+                <td>${c.compagnie || '-'}</td>
+                <td class="montant">${formatMontant(c.primeTTC || 0)}</td>
+                <td class="montant">${formatMontant(c.commissionTotale || 0)}</td>
+                <td>${c.commissionRecue ? '✓' : '⏳'}</td>
+            </tr>
+`;
+            });
+            
+            html += `
+        </tbody>
+    </table>
+</body>
+</html>
+`;
+            
+            const printWindow = window.open('', '', 'width=900,height=600');
+            printWindow.document.write(html);
+            printWindow.onload = function() {
+                printWindow.print();
+            };
+        }
+        
         function afficherTableauFinance(contratsAffiches) {
             const div = document.getElementById('tableauFinance');
             
@@ -2231,6 +2513,7 @@
             }
 
             let html = '<table><thead><tr>';
+            html += '<th style="width: 40px;">☑️</th>';  // ✅ v3.0.9 : Checkbox colonne
             html += '<th>Statut</th><th>Compagnie</th><th>Client</th><th>Date Règlement</th>';
             html += '<th>Commission</th><th>Délai</th><th>Date Réception</th><th>Actions</th>';
             html += '</tr></thead><tbody>';
@@ -2261,6 +2544,7 @@
                 }
 
                 html += '<tr>';
+                html += `<td><input type="checkbox" style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleCommissionSelectionnee(${c.id})" /></td>`;  // ✅ v3.0.9
                 html += `<td>${statutBadge}</td>`;
                 html += `<td><strong>${c.compagnie}</strong></td>`;
                 html += `<td>${c.nomClient}</td>`;
