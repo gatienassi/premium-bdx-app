@@ -847,8 +847,8 @@
 
                         <div class="form-group">
                             <label>Accessoires (FCFA)</label>
-                            <input type="number" id="accessoires" step="0.01" value="0">
-                            <small>Frais et accessoires</small>
+                            <input type="number" id="accessoires" step="0.01" value="0" oninput="calculerMontants()">
+                            <small>Frais et accessoires <span id="hintAccessoireGNA" style="display:none; color: var(--primary); font-weight: 600;">— 50% reversé en commission par GNA</span></small>
                         </div>
 
                         <div class="form-group">
@@ -904,6 +904,11 @@
                         <div class="commission-row" id="rowBonus" style="display: none;">
                             <span>Bonus (selon compagnie)</span>
                             <span id="displayBonus">0 FCFA</span>
+                        </div>
+                        <!-- v3.1.0 : Commission Accessoire GNA (50% des accessoires, exclusif GNA) -->
+                        <div class="commission-row" id="rowCommissionAccessoireGNA" style="display: none;">
+                            <span>Commission Accessoire GNA (50%)</span>
+                            <span id="displayCommissionAccessoireGNA">0 FCFA</span>
                         </div>
                         <div class="commission-row">
                             <span><strong>Commission Totale à Recevoir</strong></span>
@@ -1503,7 +1508,7 @@
                     'Date Création', 'Statut', 'Compagnie', 'Type', 'Client', 'Police',
                     'Immatriculation', 'Date Effet', 'Date Échéance', 'Prime Nette',
                     'Accessoires', 'Taxe', 'Prime TTC', 'Commission Base', 'Bonus',
-                    'Commission Totale', 'BDX N°', 'Date Règlement', 'Type Preuve', 'N° Preuve'
+                    'Commission Accessoire GNA', 'Commission Totale', 'BDX N°', 'Date Règlement', 'Type Preuve', 'N° Preuve'
                 ].join(separateur) + '\n';
 
                 contrats.forEach(c => {
@@ -1514,7 +1519,7 @@
                         c.immatriculation || '', new Date(c.dateEffet).toLocaleDateString('fr-FR'),
                         new Date(c.dateEcheance).toLocaleDateString('fr-FR'),
                         c.primeNette, c.accessoires, c.taxe, c.primeTTC,
-                        c.commissionBase, c.bonus, c.commissionTotale,
+                        c.commissionBase, c.bonus, c.commissionAccessoireGNA || 0, c.commissionTotale,
                         c.numeroBDX || '',
                         c.dateReglement ? new Date(c.dateReglement).toLocaleDateString('fr-FR') : '',
                         c.preuveType || '', c.preuveNumero || ''
@@ -1715,7 +1720,7 @@
             let html = '<form id="formCourrier"><div class="form-grid">';
             
             // Champs communs
-            html += '<div class="form-group"><label>Compagnie *</label><select id="courrierCompagnie" required><option value="">-- Sélectionner --</option>';
+            html += '<div class="form-group"><label>Compagnie *</label><select id="courrierCompagnie" required onchange="toggleChampAccessoireGNA()"><option value="">-- Sélectionner --</option>';
             [...new Set(contrats.map(c => c.compagnie))].sort().forEach(comp => {
                 html += `<option value="${comp}">${comp}</option>`;
             });
@@ -1748,6 +1753,8 @@
                 
                 html += '<div class="form-group"><label>Commission (FCFA) *</label><input type="number" id="courrierCommission" required placeholder="Montant commission"></div>';
                 html += '<div class="form-group"><label>Bonus (FCFA) *</label><input type="number" id="courrierBonus" required placeholder="Montant bonus"></div>';
+                // ✅ v3.1.0 : Champ Commission Accessoire GNA (visible seulement si compagnie = GNA)
+                html += '<div class="form-group" id="groupeCommissionAccessoireGNA" style="display:none;"><label>Commission Accessoire GNA 50% (FCFA)</label><input type="number" id="courrierCommissionAccessoireGNA" placeholder="Montant commission accessoire" value="0"></div>';
             }
             
             if (type === 'relance_commission' || type === 'reclamation') {
@@ -1769,6 +1776,15 @@
             html += '</form>';
             
             return html;
+        }
+
+        // ✅ v3.1.0 : Afficher/masquer le champ Commission Accessoire GNA selon la compagnie choisie
+        function toggleChampAccessoireGNA() {
+            const compagnie = document.getElementById('courrierCompagnie')?.value;
+            const groupe = document.getElementById('groupeCommissionAccessoireGNA');
+            if (groupe) {
+                groupe.style.display = (compagnie === 'GNA') ? 'block' : 'none';
+            }
         }
 
         function actualiserChampsPaiement() {
@@ -1874,6 +1890,8 @@
                 const polices = document.getElementById('courrierPolices').value;
                 const commission = parseFloat(document.getElementById('courrierCommission').value || 0);
                 const bonus = parseFloat(document.getElementById('courrierBonus').value || 0);
+                // ✅ v3.1.0 : Commission Accessoire GNA (50%) — champ optionnel, visible uniquement pour GNA
+                const commissionAccessoireGNA = parseFloat(document.getElementById('courrierCommissionAccessoireGNA')?.value || 0);
                 
                 // Déterminer le mode de paiement
                 const mode = document.querySelector('input[name="modePaiement"]:checked')?.value;
@@ -1929,7 +1947,12 @@
                 contenu += `${textePaiement} en règlement des\n`;
                 contenu += `polices selon le BDX ${bdx}.\n\n`;
                 contenu += `Merci par la même occasion de régler notre commission de\n`;
-                contenu += `${formatMontantCourrier(commission)} et bonus de ${formatMontantCourrier(bonus)} s'y rapportant.\n\n\n`;
+                if (compagnie === 'GNA' && commissionAccessoireGNA > 0) {
+                    contenu += `${formatMontantCourrier(commission)}, bonus de ${formatMontantCourrier(bonus)} et\n`;
+                    contenu += `commission accessoire de ${formatMontantCourrier(commissionAccessoireGNA)} (50% des accessoires) s'y rapportant.\n\n\n`;
+                } else {
+                    contenu += `${formatMontantCourrier(commission)} et bonus de ${formatMontantCourrier(bonus)} s'y rapportant.\n\n\n`;
+                }
                 contenu += `Nos cordiales salutations.\n\n\n\n`;
                 contenu += `                                                    LA COMPTABILITE`;
             }
@@ -3032,8 +3055,15 @@
         function calculerMontants() {
             const primeNette = parseFloat(document.getElementById('primeNette').value) || 0;
             const primeTTC = parseFloat(document.getElementById('primeTTC').value) || 0;
+            const accessoires = parseFloat(document.getElementById('accessoires').value) || 0;
             const compagnie = document.getElementById('compagnie').value;
             const typeAssurance = document.getElementById('typeAssurance').value;
+
+            // Indice visuel sur le champ Accessoires (visible dès que GNA est sélectionné)
+            const hintAccessoireGNA = document.getElementById('hintAccessoireGNA');
+            if (hintAccessoireGNA) {
+                hintAccessoireGNA.style.display = (compagnie === 'GNA') ? 'inline' : 'none';
+            }
 
             // Commissions (pour information - seront reversées par compagnie)
             if (compagnie && typeAssurance && primeNette !== 0) {
@@ -3052,8 +3082,14 @@
                 if (typeAssurance !== 'MALADIE') {
                     bonus = primeNette * (tauxBonus / 100);  // Bonus calculé sur prime nette
                 }
+
+                // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission
+                let commissionAccessoireGNA = 0;
+                if (compagnie === 'GNA') {
+                    commissionAccessoireGNA = accessoires * 0.5;
+                }
                 
-                const commissionTotale = commissionBase + bonus;
+                const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
 
                 // Afficher
                 document.getElementById('commissionDisplay').style.display = 'block';
@@ -3066,6 +3102,13 @@
                     document.getElementById('displayBonus').textContent = formatMontant(bonus) + ' (' + tauxBonus + '%)';
                 } else {
                     document.getElementById('rowBonus').style.display = 'none';
+                }
+
+                if (commissionAccessoireGNA > 0) {
+                    document.getElementById('rowCommissionAccessoireGNA').style.display = 'flex';
+                    document.getElementById('displayCommissionAccessoireGNA').textContent = formatMontant(commissionAccessoireGNA);
+                } else {
+                    document.getElementById('rowCommissionAccessoireGNA').style.display = 'none';
                 }
 
                 document.getElementById('displayCommissionTotale').textContent = formatMontant(commissionTotale);
@@ -3133,8 +3176,14 @@
             if (typeAssurance !== 'MALADIE') {
                 bonus = primeNette * (tauxBonus / 100);
             }
+
+            // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission par GNA
+            let commissionAccessoireGNA = 0;
+            if (compagnie === 'GNA') {
+                commissionAccessoireGNA = accessoires * 0.5;
+            }
             
-            const commissionTotale = commissionBase + bonus;
+            const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
             
             // RÈGLE SPÉCIALE : 2ACI - Commission déduite automatiquement
             const commissionDeduite = (compagnie === '2ACI');
@@ -3160,6 +3209,7 @@
                 tauxBonus,
                 commissionBase,
                 bonus,
+                commissionAccessoireGNA,   // ← NOUVEAU v3.1.0 : 50% des accessoires GNA
                 commissionTotale,
                 commissionDeduite,      // ← NOUVEAU
                 primeAReverser,         // ← NOUVEAU
@@ -3709,24 +3759,59 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             }
 
 
-            const tableData = contratsSelectionnesArray.map(c => [
-                c.nomClient,
-                c.police,
-                c.immatriculation || '-',
-                c.typeAssurance,
-                new Date(c.dateEffet).toLocaleDateString('fr-FR'), // Date Effet
-                new Date(c.dateEcheance).toLocaleDateString('fr-FR'), // Date Échéance
-                formatMontantPDF(c.primeNette),
-                formatMontantPDF(c.primeTTC),
-                formatMontantPDF(c.commissionBase),
-                formatMontantPDF(c.bonus),
-                formatMontantPDF(c.commissionTotale),
-                formatMontantPDF(c.primeAReverser || c.primeTTC)  // Prime à reverser (commission déduite si 2ACI)
-            ]);
+            // ✅ v3.1.0 : Colonne "Com. Access." ajoutée UNIQUEMENT si le BDX ne concerne que GNA
+            // (évite de modifier la mise en page des BDX des autres compagnies)
+            const isGNA = contratsSelectionnesArray.length > 0 && contratsSelectionnesArray.every(c => c.compagnie === 'GNA');
+
+            const tableData = contratsSelectionnesArray.map(c => {
+                const ligne = [
+                    c.nomClient,
+                    c.police,
+                    c.immatriculation || '-',
+                    c.typeAssurance,
+                    new Date(c.dateEffet).toLocaleDateString('fr-FR'), // Date Effet
+                    new Date(c.dateEcheance).toLocaleDateString('fr-FR'), // Date Échéance
+                    formatMontantPDF(c.primeNette),
+                    formatMontantPDF(c.primeTTC),
+                    formatMontantPDF(c.commissionBase),
+                    formatMontantPDF(c.bonus)
+                ];
+                if (isGNA) {
+                    ligne.push(formatMontantPDF(c.commissionAccessoireGNA || 0));
+                }
+                ligne.push(formatMontantPDF(c.commissionTotale));
+                ligne.push(formatMontantPDF(c.primeAReverser || c.primeTTC)); // Prime à reverser (commission déduite si 2ACI)
+                return ligne;
+            });
+
+            const bdxHead = ['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus'];
+            if (isGNA) bdxHead.push('Com. Access.');
+            bdxHead.push('Total Com.', 'Prime à Reverser');
+
+            const bdxColumnStyles = {
+                0: { halign: 'left', cellWidth: 22 },
+                1: { halign: 'left', cellWidth: 24 },
+                2: { halign: 'center', cellWidth: 14 },
+                3: { halign: 'center', cellWidth: 12 },
+                4: { halign: 'center', cellWidth: 17 },
+                5: { halign: 'center', cellWidth: 17 },
+                6: { halign: 'right', cellWidth: 19 },
+                7: { halign: 'right', cellWidth: 19 },
+                8: { halign: 'right', cellWidth: 17 },
+                9: { halign: 'right', cellWidth: 14 }
+            };
+            if (isGNA) {
+                bdxColumnStyles[10] = { halign: 'right', cellWidth: 17 }; // Com. Access.
+                bdxColumnStyles[11] = { halign: 'right', cellWidth: 17 }; // Total Com.
+                bdxColumnStyles[12] = { halign: 'right', cellWidth: 19 }; // Prime à Reverser
+            } else {
+                bdxColumnStyles[10] = { halign: 'right', cellWidth: 18 }; // Total Com.
+                bdxColumnStyles[11] = { halign: 'right', cellWidth: 20 }; // Prime à Reverser
+            }
 
             doc.autoTable({
                 startY: 55,
-                head: [['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus', 'Total Com.', 'Prime à Reverser']],
+                head: [bdxHead],
                 body: tableData.slice(0, Math.min(7, tableData.length)), // PAGINATION v2.9.8 : MAX 7 lignes page 1
                 theme: 'grid',
                 orientation: 'landscape',
@@ -3753,20 +3838,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                     textColor: [0, 0, 0],
                     valign: 'middle'
                 },
-                columnStyles: {
-                    0: { halign: 'left', cellWidth: 22 },
-                    1: { halign: 'left', cellWidth: 25 },
-                    2: { halign: 'center', cellWidth: 15 },
-                    3: { halign: 'center', cellWidth: 13 },
-                    4: { halign: 'center', cellWidth: 18 },
-                    5: { halign: 'center', cellWidth: 18 },
-                    6: { halign: 'right', cellWidth: 20 },
-                    7: { halign: 'right', cellWidth: 20 },
-                    8: { halign: 'right', cellWidth: 18 },
-                    9: { halign: 'right', cellWidth: 15 },
-                    10: { halign: 'right', cellWidth: 18 },
-                    11: { halign: 'right', cellWidth: 20 }
-                }
+                columnStyles: bdxColumnStyles
             });
 
             // PAGINATION v2.9.8 : Si > 7 contrats, ajouter les suivants sur page suivante
@@ -3787,7 +3859,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                     
                     doc.autoTable({
                         startY: 40,
-                        head: [['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus', 'Total Com.', 'Prime à Reverser']],
+                        head: [bdxHead],
                         body: tableData.slice(i, Math.min(i + 7, tableData.length)),
                         theme: 'grid',
                         orientation: 'landscape',
@@ -3814,26 +3886,14 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                             textColor: [0, 0, 0],
                             valign: 'middle'
                         },
-                        columnStyles: {
-                            0: { halign: 'left', cellWidth: 22 },
-                            1: { halign: 'left', cellWidth: 25 },
-                            2: { halign: 'center', cellWidth: 15 },
-                            3: { halign: 'center', cellWidth: 13 },
-                            4: { halign: 'center', cellWidth: 18 },
-                            5: { halign: 'center', cellWidth: 18 },
-                            6: { halign: 'right', cellWidth: 20 },
-                            7: { halign: 'right', cellWidth: 20 },
-                            8: { halign: 'right', cellWidth: 18 },
-                            9: { halign: 'right', cellWidth: 15 },
-                            10: { halign: 'right', cellWidth: 18 },
-                            11: { halign: 'right', cellWidth: 20 }
-                        }
+                        columnStyles: bdxColumnStyles
                     });
                 }
             }
 
             const totalPrimeTTC = contratsSelectionnesArray.reduce((sum, c) => sum + c.primeTTC, 0);
             const totalCommission = contratsSelectionnesArray.reduce((sum, c) => sum + c.commissionTotale, 0);
+            const totalCommissionAccessoireGNA = contratsSelectionnesArray.reduce((sum, c) => sum + (c.commissionAccessoireGNA || 0), 0);
             const finalY = doc.lastAutoTable.finalY + 12;
             
             // Totaux centrés en mode paysage
@@ -3844,6 +3904,13 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             doc.setFontSize(12);
             doc.setFont(undefined, 'bold');
             doc.text(`Commission totale à recevoir : ${formatMontantPDF(totalCommission, true)}`, 148.5, finalY + 10, { align: 'center' });
+
+            // ✅ v3.1.0 : Ligne visible "dont Commission Accessoire GNA" si applicable
+            if (isGNA && totalCommissionAccessoireGNA > 0) {
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.text(`(dont Commission Accessoire GNA 50% : ${formatMontantPDF(totalCommissionAccessoireGNA, true)})`, 148.5, finalY + 17, { align: 'center' });
+            }
 
             // Sauvegarder le BDX pour génération courrier
             const totalCommissionBase = contratsSelectionnesArray.reduce((sum, c) => sum + c.commissionBase, 0);
@@ -3862,6 +3929,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                 primeTotale: totalPrimeTTC,
                 commissionBase: totalCommissionBase,
                 bonus: totalBonus,
+                commissionAccessoireGNA: totalCommissionAccessoireGNA,
                 numerosPolice: numerosPolice,
                 dateGeneration: new Date().toISOString()
             });
@@ -4414,6 +4482,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                 numeroBDX: bdx.numeroBDX,
                 commission: formatMontantSimple(bdx.commissionBase),
                 bonus: formatMontantSimple(bdx.bonus),
+                commissionAccessoireGNA: formatMontantSimple(bdx.commissionAccessoireGNA || 0),
                 commissionDeduite: commissionDeduite
             });
             
@@ -4577,7 +4646,10 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                         new Paragraph({
                             children: [
                                 new TextRun({
-                                    text: `Merci par la même occasion de régler notre commission de ${data.commission} F CFA et bonus de ${data.bonus} F CFA s'y rapportant.`,
+                                    // ✅ v3.1.0 : Mention Commission Accessoire GNA (50%) si compagnie GNA et montant > 0
+                                    text: (data.compagnie === 'GNA' && data.commissionAccessoireGNA && data.commissionAccessoireGNA !== "0")
+                                        ? `Merci par la même occasion de régler notre commission de ${data.commission} F CFA, bonus de ${data.bonus} F CFA et commission accessoire de ${data.commissionAccessoireGNA} F CFA (50% des accessoires) s'y rapportant.`
+                                        : `Merci par la même occasion de régler notre commission de ${data.commission} F CFA et bonus de ${data.bonus} F CFA s'y rapportant.`,
                                     size: 24,
                                 }),
                             ],
@@ -5917,13 +5989,27 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         }
         
         // Récupérer taux commission
-        const tauxCommission = TAUX_COMMISSION[row.compagnie] || 20;
+        // ✅ v3.1.0 : CORRECTIF - le taux de commission dépend du TYPE D'ASSURANCE, pas de la compagnie
+        // (TAUX_COMMISSION n'a jamais eu de clés compagnie : ce lookup retombait toujours sur 20% par défaut)
+        let tauxCommission = TAUX_COMMISSION[row.typeAssurance] || 20;
         const tauxBonus = TAUX_BONUS[row.compagnie] || 0;
+
+        // RÈGLE SPÉCIALE : PVT avec NSIA = 27% au lieu de 25% (alignée sur la saisie manuelle)
+        if (row.typeAssurance === 'PVT' && row.compagnie === 'NSIA') {
+            tauxCommission = 27;
+        }
         
         // Calculer commissions
-        const commissionBase = Math.round(primeTTC * tauxCommission / 100);
-        const bonus = tauxBonus > 0 ? Math.round(commissionBase * tauxBonus / 100) : 0;
-        const commissionTotale = commissionBase + bonus;
+        // ✅ v3.1.0 : CORRECTIF - commission et bonus calculés sur la PRIME NETTE, jamais sur la Prime TTC ni sur la commission
+        const commissionBase = Math.round(primeNette * tauxCommission / 100);
+        let bonus = 0;
+        if (row.typeAssurance !== 'MALADIE') {
+            bonus = tauxBonus > 0 ? Math.round(primeNette * tauxBonus / 100) : 0;
+        }
+        // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission
+        const accessoiresImport = parseInt(row.accessoires) || 0;
+        const commissionAccessoireGNA = (row.compagnie === 'GNA') ? Math.round(accessoiresImport * 0.5) : 0;
+        const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
         
         // Créer contrat
         const contrat = {
@@ -5937,7 +6023,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             dateEffet: dateEffet,
             dateEcheance: dateEcheance,
             primeNette: primeNette,
-            accessoires: parseInt(row.accessoires) || 0,
+            accessoires: accessoiresImport,
             taxe: taxe,
             primeTTC: primeTTC,
             montantPercu: montantPercu,
@@ -5946,6 +6032,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             tauxBonus: tauxBonus,
             commissionBase: commissionBase,
             bonus: bonus,
+            commissionAccessoireGNA: commissionAccessoireGNA,
             commissionTotale: commissionTotale,
             commissionDeduite: false,
             primeAReverser: primeTTC,
