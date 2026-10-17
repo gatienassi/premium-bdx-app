@@ -5,12 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>BDX Règlement - Premium Courtage Assur</title>
     <!-- Firebase SDK -->
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
     <!-- jsPDF & Docx -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.js"></script>
     <style>
@@ -647,9 +648,83 @@
             background: #f9fafb;
             border-top: 1px solid #e5e7eb;
         }
+
+        /* Indicateur LED Firebase */
+        .firebase-led {
+            position: fixed;
+            top: 15px;
+            right: 15px;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 0 8px rgba(0, 0, 0, 0.3);
+            z-index: 9999;
+        }
+
+        /* États de la LED */
+        .firebase-led.connected {
+            background-color: #10b981;
+            box-shadow: 0 0 12px rgba(16, 185, 129, 0.6);
+        }
+
+        .firebase-led.offline {
+            background-color: #f59e0b;
+            box-shadow: 0 0 12px rgba(245, 158, 11, 0.6);
+        }
+
+        .firebase-led.error {
+            background-color: #ef4444;
+            box-shadow: 0 0 12px rgba(239, 68, 68, 0.6);
+            animation: pulse-error 1s infinite;
+        }
+
+        @keyframes pulse-error {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.6; }
+        }
+
+        .firebase-led.connecting {
+            background-color: #3b82f6;
+            box-shadow: 0 0 12px rgba(59, 130, 246, 0.6);
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* Tooltip pour la LED */
+        .firebase-tooltip {
+            position: absolute;
+            bottom: -35px;
+            right: 0;
+            background-color: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            white-space: nowrap;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 10000;
+        }
+
+        .firebase-led:hover .firebase-tooltip {
+            opacity: 1;
+        }
     </style>
     <!-- Bibliothèque pour génération Word -->
     <script src="https://unpkg.com/docx@7.8.2/build/index.js"></script>
+    <!-- ✅ v3.0.10 : Bibliothèques PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
 <body>
     <!-- ÉCRAN LOGIN -->
@@ -671,6 +746,11 @@
     <div id="userInfo" class="user-info" style="display: none;">
         <span>👤 <span id="userName"></span></span>
         <button class="logout-btn" onclick="seDeconnecter()">🚪 Déconnexion</button>
+    </div>
+
+    <!-- INDICATEUR LED FIREBASE -->
+    <div id="firebaseLed" class="firebase-led offline">
+        <div class="firebase-tooltip" id="firebaseTooltip">Initialisatîon...</div>
     </div>
 
     <!-- APPLICATION PRINCIPALE -->
@@ -713,6 +793,7 @@
                                 <option value="">-- Sélectionner --</option>
                                 <option value="AUTO">AUTO - Automobile (20%)</option>
                                 <option value="MRP">MRP - Multirisques Pro (27%)</option>
+                                <option value="MRI">MRI - Multirisques Immeuble (27%)</option>
                                 <option value="RC">RC - Responsabilité Civile (23%)</option>
                                 <option value="MRH">MRH - Multirisques Habitation (27%)</option>
                                 <option value="IA">IA - Incendie (24%)</option>
@@ -766,8 +847,8 @@
 
                         <div class="form-group">
                             <label>Accessoires (FCFA)</label>
-                            <input type="number" id="accessoires" step="0.01" value="0">
-                            <small>Frais et accessoires</small>
+                            <input type="number" id="accessoires" step="0.01" value="0" oninput="calculerMontants()">
+                            <small>Frais et accessoires <span id="hintAccessoireGNA" style="display:none; color: var(--primary); font-weight: 600;">— 50% reversé en commission par GNA</span></small>
                         </div>
 
                         <div class="form-group">
@@ -823,6 +904,11 @@
                         <div class="commission-row" id="rowBonus" style="display: none;">
                             <span>Bonus (selon compagnie)</span>
                             <span id="displayBonus">0 FCFA</span>
+                        </div>
+                        <!-- v3.1.0 : Commission Accessoire GNA (50% des accessoires, exclusif GNA) -->
+                        <div class="commission-row" id="rowCommissionAccessoireGNA" style="display: none;">
+                            <span>Commission Accessoire GNA (50%)</span>
+                            <span id="displayCommissionAccessoireGNA">0 FCFA</span>
                         </div>
                         <div class="commission-row">
                             <span><strong>Commission Totale à Recevoir</strong></span>
@@ -957,8 +1043,9 @@
 
                 <div id="listeBDX"></div>
 
-                <div style="margin-top: 20px; display: flex; gap: 15px;" class="no-print">
+                <div style="margin-top: 20px; display: flex; gap: 15px; flex-wrap: wrap;" class="no-print">
                     <button class="btn btn-success" onclick="genererPDF()">📄 Générer PDF</button>
+                    <button class="btn btn-info" onclick="exporterBDXExcel()" style="background-color: #059669;">📊 Exporter Excel</button>
                     <button class="btn btn-primary" onclick="ouvrirModalReglement()">✅ Marquer Sélection comme Réglée</button>
                     <button class="btn btn-warning" onclick="archiverSelection()">📦 Archiver Sélection</button>
                 </div>
@@ -1048,13 +1135,31 @@
                 <!-- SAUVEGARDE & SÉCURITÉ -->
                 <div style="background: #f3f4f6; padding: 20px; border-radius: 12px; margin-bottom: 30px;">
                     <h3 style="color: var(--primary); margin-bottom: 15px;">💾 Sauvegarde & Sécurité</h3>
+                    
+                    <!-- v3.0.4 : BOUTONS MANUELS -->
+                    <div style="background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                        <h4 style="color: #d97706; margin: 0 0 10px 0;">🔐 v3.0.4 : Synchronisation Manuelle</h4>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <button class="btn" onclick="restaurerDepuisJSON()" style="background-color: #0ea5e9; color: white;">📥 Restaurer depuis JSON</button>
+                            <button class="btn" onclick="sauvegarderManuelAFirebase()" style="background-color: #10b981; color: white;">☁️ SAUVEGARDER À FIREBASE</button>
+                        </div>
+                        <p style="font-size: 12px; color: #92400e; margin: 10px 0 0 0;">
+                            ⚠️ IMPORTANT : Après restauration, cliquez sur "SAUVEGARDER À FIREBASE" et attendez le message ✅ avant de vider le cache !
+                        </p>
+                    </div>
+                    
                     <div style="display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px;">
                         <button class="btn btn-success" onclick="exporterDonnees('json')">💾 Export JSON</button>
                         <button class="btn btn-success" onclick="exporterDonnees('excel')">📊 Export Excel</button>
                         <button class="btn btn-success" onclick="exporterDonnees('csv')">📄 Export CSV</button>
                         <button class="btn btn-primary" onclick="document.getElementById('importFile').click()">📥 Importer Données</button>
+                        <button class="btn btn-danger" onclick="document.getElementById('importSauvegardeFile').click()" style="background-color: #dc2626;">🔴 Remplacer par Sauvegarde</button>
+                        <button class="btn btn-info" onclick="document.getElementById('importBDXFile').click()">📥 Importer BDX Excel</button>
                         <button class="btn btn-warning" onclick="afficherHistoriqueModifications()">📜 Historique Modifications</button>
+                        <button class="btn btn-info" onclick="forcerSynchronisation()" style="background-color: #0ea5e9;">🔄 Forcer Synchronisation</button>
                         <input type="file" id="importFile" accept=".json" style="display: none;" onchange="importerDonnees(event)">
+                        <input type="file" id="importSauvegardeFile" accept=".json" style="display: none;" onchange="remplacerParSauvegarde(event)">
+                        <input type="file" id="importBDXFile" accept=".csv,.xlsx,.xls" style="display: none;" onchange="importerBDXExcel(event)">
                     </div>
                     <div class="alert alert-info" style="font-size: 13px;">
                         <span>ℹ️</span>
@@ -1121,6 +1226,7 @@
                                 <option value="a_recevoir">À recevoir</option>
                                 <option value="recues">Reçues</option>
                                 <option value="retard">En retard (>60j)</option>
+                            <option value="archivees">Archivées</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -1137,6 +1243,33 @@
 
                 <!-- TABLEAU COMMISSIONS -->
                 <h3 style="color: var(--primary); margin-bottom: 15px;">📋 Suivi Commissions</h3>
+                
+                <!-- ✅ v3.0.9 : BOUTONS ACTIONS COMMISSIONS -->
+                <div style="display: flex; gap: 10px; margin-bottom: 15px; flex-wrap: wrap;">
+                    <button class="btn" onclick="genererPDFCommissions()" style="background-color: #dc2626; color: white;">
+                        📥 Télécharger PDF (Non réglées)
+                    </button>
+                    <button class="btn" onclick="imprimerCommissions()" style="background-color: #2563eb; color: white;">
+                        🖨️ Imprimer (Non réglées)
+                    </button>
+                    <button class="btn" onclick="afficherFormulaireArchivage()" style="background-color: #f97316; color: white;">
+                        🗂️ Archiver Sélection
+                    </button>
+                </div>
+                
+                <!-- ✅ v3.0.9 : FORMULE ARCHIVAGE (CACHÉE) -->
+                <div id="formulaireArchivage" style="display: none; background: #fef3c7; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #f59e0b;">
+                    <h4 style="color: #d97706; margin: 0 0 10px 0;">🗂️ Archiver les commissions sélectionnées</h4>
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn" onclick="archiverCommissionsSelectionnees()" style="background-color: #16a34a; color: white;">
+                            ✅ Confirmer l'archivage
+                        </button>
+                        <button class="btn" onclick="document.getElementById('formulaireArchivage').style.display='none'" style="background-color: #6b7280; color: white;">
+                            ❌ Annuler
+                        </button>
+                    </div>
+                </div>
+                
                 <div id="tableauFinance"></div>
 
                 <!-- PRÉVISIONS TRÉSORERIE -->
@@ -1300,13 +1433,14 @@
         
         const COMPAGNIES = [
             '2ACI', 'ALLIANZ', 'AMSA', 'ATLANTA', 'AXA', 
-            'COMAR', 'CORIS', 'GNA', 'NSIA', 'SANLAM', 'SCHIBA', 'SUNU'
+            'COMAR', 'CORIS', 'GNA', 'NSIA', 'SANLAM', 'SANLAM-ALLIANZ', 'SCHIBA', 'SUNU'
         ];
 
         // Taux commission selon TYPE D'ASSURANCE
         const TAUX_COMMISSION = {
             'AUTO': 20,
             'MRP': 27,
+            'MRI': 27,
             'RC': 23,
             'MRH': 27,
             'IA': 24,
@@ -1374,7 +1508,7 @@
                     'Date Création', 'Statut', 'Compagnie', 'Type', 'Client', 'Police',
                     'Immatriculation', 'Date Effet', 'Date Échéance', 'Prime Nette',
                     'Accessoires', 'Taxe', 'Prime TTC', 'Commission Base', 'Bonus',
-                    'Commission Totale', 'BDX N°', 'Date Règlement', 'Type Preuve', 'N° Preuve'
+                    'Commission Accessoire GNA', 'Commission Totale', 'BDX N°', 'Date Règlement', 'Type Preuve', 'N° Preuve'
                 ].join(separateur) + '\n';
 
                 contrats.forEach(c => {
@@ -1385,7 +1519,7 @@
                         c.immatriculation || '', new Date(c.dateEffet).toLocaleDateString('fr-FR'),
                         new Date(c.dateEcheance).toLocaleDateString('fr-FR'),
                         c.primeNette, c.accessoires, c.taxe, c.primeTTC,
-                        c.commissionBase, c.bonus, c.commissionTotale,
+                        c.commissionBase, c.bonus, c.commissionAccessoireGNA || 0, c.commissionTotale,
                         c.numeroBDX || '',
                         c.dateReglement ? new Date(c.dateReglement).toLocaleDateString('fr-FR') : '',
                         c.preuveType || '', c.preuveNumero || ''
@@ -1447,6 +1581,62 @@
             lecteur.readAsText(fichier);
             event.target.value = '';
         }
+
+        /**
+         * Remplacer COMPLÈTEMENT les données par une sauvegarde JSON
+         */
+        function remplacerParSauvegarde(event) {
+            const fichier = event.target.files[0];
+            if (!fichier) return;
+
+            // CONFIRMATION IMPORTANTE
+            if (!confirm(`🔴 ATTENTION - REMPLACEMENT COMPLET !\n\nCette action va :\n✓ Supprimer TOUS vos contrats actuels\n✓ Supprimer TOUS vos BDX\n✓ Charger les données de ${fichier.name}\n✓ Synchroniser avec Firebase\n\n⚠️ CETTE ACTION EST IRRÉVERSIBLE !\n\nVoulez-vous vraiment continuer ?`)) {
+                event.target.value = '';
+                return;
+            }
+
+            const lecteur = new FileReader();
+            lecteur.onload = function(e) {
+                try {
+                    const donnees = JSON.parse(e.target.result);
+                    
+                    // Validation des données
+                    if (!donnees.contrats || !Array.isArray(donnees.contrats)) {
+                        throw new Error('Format invalide : "contrats" manquant');
+                    }
+
+                    // Sauvegarder les anciens nombres
+                    const nbContratsAvant = contrats.length;
+                    const nbBDXAvant = bdxGeneres.length;
+
+                    // REMPLACER COMPLÈTEMENT
+                    contrats = donnees.contrats || [];
+                    bdxGeneres = donnees.bdxGeneres || [];
+
+                    // Sauvegarder localement
+                    sauvegarderDonnees();
+
+                    // Enregistrer dans l'historique
+                    enregistrerModification('REMPLACEMENT_COMPLET', 
+                        `Remplacement par sauvegarde : ${contrats.length} contrats (avant: ${nbContratsAvant}), ${bdxGeneres.length} BDX (avant: ${nbBDXAvant})`);
+
+                    // Message de confirmation
+                    alert(`✅ Remplacement réussi !\n\n📊 Résumé :\n- Contrats : ${contrats.length} (avant: ${nbContratsAvant})\n- BDX : ${bdxGeneres.length} (avant: ${nbBDXAvant})\n\nLes données sont synchronisées sur Firebase.`);
+
+                    // Actualiser l'affichage
+                    afficherHistorique();
+                    filtrerContratsBDX();
+                    actualiserListeContrats();
+                    mettreAJourLEDFirebase('connected', 'Données remplacées et synchro');
+
+                } catch (error) {
+                    alert(`❌ Erreur lors du remplacement\n\n${error.message}\n\nVérifiez que le fichier est un JSON valide.`);
+                }
+            };
+            lecteur.readAsText(fichier);
+            event.target.value = '';
+        }
+
 
         function enregistrerModification(type, details) {
             const historique = JSON.parse(localStorage.getItem('historique_modifications') || '[]');
@@ -1530,7 +1720,7 @@
             let html = '<form id="formCourrier"><div class="form-grid">';
             
             // Champs communs
-            html += '<div class="form-group"><label>Compagnie *</label><select id="courrierCompagnie" required><option value="">-- Sélectionner --</option>';
+            html += '<div class="form-group"><label>Compagnie *</label><select id="courrierCompagnie" required onchange="toggleChampAccessoireGNA()"><option value="">-- Sélectionner --</option>';
             [...new Set(contrats.map(c => c.compagnie))].sort().forEach(comp => {
                 html += `<option value="${comp}">${comp}</option>`;
             });
@@ -1563,6 +1753,8 @@
                 
                 html += '<div class="form-group"><label>Commission (FCFA) *</label><input type="number" id="courrierCommission" required placeholder="Montant commission"></div>';
                 html += '<div class="form-group"><label>Bonus (FCFA) *</label><input type="number" id="courrierBonus" required placeholder="Montant bonus"></div>';
+                // ✅ v3.1.0 : Champ Commission Accessoire GNA (visible seulement si compagnie = GNA)
+                html += '<div class="form-group" id="groupeCommissionAccessoireGNA" style="display:none;"><label>Commission Accessoire GNA 50% (FCFA)</label><input type="number" id="courrierCommissionAccessoireGNA" placeholder="Montant commission accessoire" value="0"></div>';
             }
             
             if (type === 'relance_commission' || type === 'reclamation') {
@@ -1584,6 +1776,15 @@
             html += '</form>';
             
             return html;
+        }
+
+        // ✅ v3.1.0 : Afficher/masquer le champ Commission Accessoire GNA selon la compagnie choisie
+        function toggleChampAccessoireGNA() {
+            const compagnie = document.getElementById('courrierCompagnie')?.value;
+            const groupe = document.getElementById('groupeCommissionAccessoireGNA');
+            if (groupe) {
+                groupe.style.display = (compagnie === 'GNA') ? 'block' : 'none';
+            }
         }
 
         function actualiserChampsPaiement() {
@@ -1689,6 +1890,8 @@
                 const polices = document.getElementById('courrierPolices').value;
                 const commission = parseFloat(document.getElementById('courrierCommission').value || 0);
                 const bonus = parseFloat(document.getElementById('courrierBonus').value || 0);
+                // ✅ v3.1.0 : Commission Accessoire GNA (50%) — champ optionnel, visible uniquement pour GNA
+                const commissionAccessoireGNA = parseFloat(document.getElementById('courrierCommissionAccessoireGNA')?.value || 0);
                 
                 // Déterminer le mode de paiement
                 const mode = document.querySelector('input[name="modePaiement"]:checked')?.value;
@@ -1744,7 +1947,12 @@
                 contenu += `${textePaiement} en règlement des\n`;
                 contenu += `polices selon le BDX ${bdx}.\n\n`;
                 contenu += `Merci par la même occasion de régler notre commission de\n`;
-                contenu += `${formatMontantCourrier(commission)} et bonus de ${formatMontantCourrier(bonus)} s'y rapportant.\n\n\n`;
+                if (compagnie === 'GNA' && commissionAccessoireGNA > 0) {
+                    contenu += `${formatMontantCourrier(commission)}, bonus de ${formatMontantCourrier(bonus)} et\n`;
+                    contenu += `commission accessoire de ${formatMontantCourrier(commissionAccessoireGNA)} (50% des accessoires) s'y rapportant.\n\n\n`;
+                } else {
+                    contenu += `${formatMontantCourrier(commission)} et bonus de ${formatMontantCourrier(bonus)} s'y rapportant.\n\n\n`;
+                }
                 contenu += `Nos cordiales salutations.\n\n\n\n`;
                 contenu += `                                                    LA COMPTABILITE`;
             }
@@ -2046,7 +2254,16 @@
             const compagnie = document.getElementById('financeCompagnie').value;
             const maintenant = new Date();
             
-            let contratsAffiches = contrats.filter(c => c.regle && !c.archive);
+            // ✅ v3.0.9 : Ajouter filtre archivées
+            let contratsAffiches;
+            
+            if (statut === 'archivees') {
+                // Afficher SEULEMENT les commissions archivées
+                contratsAffiches = contrats.filter(c => c.commissionArchivee && c.regle);
+            } else {
+                // Afficher les commissions NON archivées
+                contratsAffiches = contrats.filter(c => c.regle && !c.archive && !c.commissionArchivee);
+            }
             
             if (compagnie) {
                 contratsAffiches = contratsAffiches.filter(c => c.compagnie === compagnie);
@@ -2068,6 +2285,248 @@
             afficherTableauFinance(contratsAffiches);
         }
 
+        // ✅ v3.0.9 : GESTION ARCHIVAGE COMMISSIONS
+        window.commissionsSelectionnees = new Set();
+        
+        function afficherFormulaireArchivage() {
+            if (commissionsSelectionnees.size === 0) {
+                alert('⚠️ Aucune commission sélectionnée');
+                return;
+            }
+            document.getElementById('formulaireArchivage').style.display = 'block';
+        }
+        
+        function archiverCommissionsSelectionnees() {
+            if (commissionsSelectionnees.size === 0) {
+                alert('⚠️ Aucune commission sélectionnée');
+                return;
+            }
+            
+            const nombreArchives = commissionsSelectionnees.size;
+            
+            if (confirm(`Archiver ${nombreArchives} commission(s) ?\n\nElles disparaîtront du suivi mais resteront dans l'historique.`)) {
+                contrats.forEach(c => {
+                    if (commissionsSelectionnees.has(c.id)) {
+                        c.commissionArchivee = true;  // ✅ Marquer comme archivée
+                    }
+                });
+                
+                console.log(`🗂️ v3.0.9 : Archivage de ${nombreArchives} commission(s)...`);
+                sauvegarderDonneesCloudImmediatement();  // Sauvegarder à Firebase
+                
+                commissionsSelectionnees.clear();
+                document.getElementById('formulaireArchivage').style.display = 'none';
+                filtrerFinance();  // Rafraîchir l'affichage
+                
+                console.log(`✅ v3.0.9 : ${nombreArchives} commission(s) archivée(s) et sauvegardées à Firebase`);
+                alert(`✅ ${nombreArchives} commission(s) archivée(s)`);
+            }
+        }
+        
+        function toggleCommissionSelectionnee(contratId) {
+            if (commissionsSelectionnees.has(contratId)) {
+                commissionsSelectionnees.delete(contratId);
+            } else {
+                commissionsSelectionnees.add(contratId);
+            }
+        }
+        
+        // ✅ v3.0.11 : HTML REGROUPÉ PAR COMPAGNIE AVEC DÉLAI
+        function genererPDFCommissions() {
+            const commissionsARecevoir = contrats.filter(c => c.regle && !c.commissionRecue && !c.commissionArchivee);
+            
+            if (commissionsARecevoir.length === 0) {
+                alert('⚠️ Aucune commission à recevoir');
+                return;
+            }
+            
+            console.log(`📥 v3.0.11 : Génération HTML regroupée par compagnie (${commissionsARecevoir.length} commissions)...`);
+            
+            // Regrouper par compagnie
+            const parCompagnie = {};
+            commissionsARecevoir.forEach(c => {
+                if (!parCompagnie[c.compagnie]) {
+                    parCompagnie[c.compagnie] = [];
+                }
+                parCompagnie[c.compagnie].push(c);
+            });
+            
+            const maintenant = new Date();
+            let html = `
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Commissions à Recevoir - Premium Courtage Assur</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 40px; background: white; }
+        .header { text-align: center; margin-bottom: 30px; border-bottom: 3px solid #2563eb; padding-bottom: 20px; }
+        .header h1 { color: #2563eb; margin: 0; font-size: 24px; }
+        .header p { color: #64748b; margin: 5px 0 0 0; }
+        .compagnie-section { margin: 30px 0; page-break-inside: avoid; }
+        .compagnie-header { background-color: #dbeafe; padding: 12px; font-weight: bold; font-size: 14px; border-left: 4px solid #2563eb; margin-bottom: 15px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 20px; }
+        th { background-color: #f3f4f6; padding: 10px; text-align: left; font-weight: bold; border-bottom: 2px solid #2563eb; font-size: 12px; }
+        td { padding: 8px; border-bottom: 1px solid #e5e7eb; font-size: 12px; }
+        tr:nth-child(even) { background-color: #f9fafb; }
+        .montant { text-align: right; }
+        .sous-total { background-color: #fef3c7; font-weight: bold; }
+        .total-general { background-color: #dbeafe; font-weight: bold; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>💰 Commissions à Recevoir</h1>
+        <p>Premium Courtage Assur - ${new Date().toLocaleDateString('fr-FR')}</p>
+    </div>
+`;
+            
+            let totalGeneral = 0;
+            
+            // Parcourir chaque compagnie
+            Object.keys(parCompagnie).sort().forEach(compagnie => {
+                const commissions = parCompagnie[compagnie];
+                let totalCompagnie = 0;
+                
+                html += `
+    <div class="compagnie-section">
+        <div class="compagnie-header">🏢 ${compagnie}</div>
+        <table>
+            <thead>
+                <tr>
+                    <th>Date Effet</th>
+                    <th>Client</th>
+                    <th>Type</th>
+                    <th>Prime TTC</th>
+                    <th>Commission</th>
+                    <th>Délai (j)</th>
+                </tr>
+            </thead>
+            <tbody>
+`;
+                
+                commissions.forEach(c => {
+                    const commission = c.commissionTotale || 0;
+                    totalCompagnie += commission;
+                    totalGeneral += commission;
+                    
+                    // Calculer délai
+                    let delai = '-';
+                    if (c.dateReglement) {
+                        delai = Math.floor((maintenant - new Date(c.dateReglement)) / (1000 * 60 * 60 * 24));
+                    }
+                    
+                    html += `
+                <tr>
+                    <td>${c.dateEffet ? new Date(c.dateEffet).toLocaleDateString('fr-FR') : '-'}</td>
+                    <td>${c.nomClient || c.client || '-'}</td>
+                    <td>${c.typeAssurance || '-'}</td>
+                    <td class="montant">${formatMontant(c.primeTTC || 0)}</td>
+                    <td class="montant">${formatMontant(commission)}</td>
+                    <td class="montant">${delai}</td>
+                </tr>
+`;
+                });
+                
+                html += `
+            </tbody>
+        </table>
+        <div style="text-align: right; margin-bottom: 20px; font-weight: bold; padding: 10px; background: #fef3c7;">
+            Sous-total ${compagnie} : <span class="montant">${formatMontant(totalCompagnie)}</span>
+        </div>
+    </div>
+`;
+            });
+            
+            html += `
+    <div class="total-general" style="text-align: right; padding: 15px; font-size: 16px;">
+        TOTAL GÉNÉRAL : ${formatMontant(totalGeneral)}
+    </div>
+    
+    <p style="margin-top: 40px; text-align: center; color: #64748b; font-size: 12px;">
+        Nombre total de commissions : ${commissionsARecevoir.length}
+    </p>
+</body>
+</html>
+`;
+            
+            // Télécharger en HTML
+            const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `Commissions-ARecevoir-${new Date().toLocaleDateString('fr-FR')}.html`;
+            a.click();
+            
+            console.log(`✅ v3.0.11 : HTML regroupé par compagnie généré et téléchargé`);
+        }
+        
+        // ✅ v3.0.10 : IMPRIMER COMMISSIONS À RECEVOIR
+        function imprimerCommissions() {
+            // ✅ v3.0.10 : Filtre correct
+            const commissionsARecevoir = contrats.filter(c => c.regle && !c.commissionRecue && !c.commissionArchivee);
+            
+            if (commissionsARecevoir.length === 0) {
+                alert('⚠️ Aucune commission à imprimer');
+                return;
+            }
+            
+            let html = `
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Impression Commissions</title>
+    <style>
+        body { font-family: Arial; margin: 20px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #000; padding: 8px; text-align: left; }
+        th { background-color: #ccc; font-weight: bold; }
+        .montant { text-align: right; }
+    </style>
+</head>
+<body>
+    <h2>Commissions à Recevoir - ${new Date().toLocaleDateString('fr-FR')}</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th>Client</th>
+                <th>Compagnie</th>
+                <th>Prime</th>
+                <th>Commission</th>
+                <th>Statut</th>
+            </tr>
+        </thead>
+        <tbody>
+`;
+            
+            commissionsARecevoir.forEach(c => {
+                html += `
+            <tr>
+                <td>${c.dateEffet || '-'}</td>
+                <td>${c.nomClient || c.client || '-'}</td>
+                <td>${c.compagnie || '-'}</td>
+                <td class="montant">${formatMontant(c.primeTTC || 0)}</td>
+                <td class="montant">${formatMontant(c.commissionTotale || 0)}</td>
+                <td>${c.commissionRecue ? '✓' : '⏳'}</td>
+            </tr>
+`;
+            });
+            
+            html += `
+        </tbody>
+    </table>
+</body>
+</html>
+`;
+            
+            const printWindow = window.open('', '', 'width=900,height=600');
+            printWindow.document.write(html);
+            printWindow.onload = function() {
+                printWindow.print();
+            };
+        }
+        
         function afficherTableauFinance(contratsAffiches) {
             const div = document.getElementById('tableauFinance');
             
@@ -2077,6 +2536,7 @@
             }
 
             let html = '<table><thead><tr>';
+            html += '<th style="width: 40px;">☑️</th>';  // ✅ v3.0.9 : Checkbox colonne
             html += '<th>Statut</th><th>Compagnie</th><th>Client</th><th>Date Règlement</th>';
             html += '<th>Commission</th><th>Délai</th><th>Date Réception</th><th>Actions</th>';
             html += '</tr></thead><tbody>';
@@ -2107,6 +2567,7 @@
                 }
 
                 html += '<tr>';
+                html += `<td><input type="checkbox" style="width: 18px; height: 18px; cursor: pointer;" onchange="toggleCommissionSelectionnee(${c.id})" /></td>`;  // ✅ v3.0.9
                 html += `<td>${statutBadge}</td>`;
                 html += `<td><strong>${c.compagnie}</strong></td>`;
                 html += `<td>${c.nomClient}</td>`;
@@ -2594,8 +3055,15 @@
         function calculerMontants() {
             const primeNette = parseFloat(document.getElementById('primeNette').value) || 0;
             const primeTTC = parseFloat(document.getElementById('primeTTC').value) || 0;
+            const accessoires = parseFloat(document.getElementById('accessoires').value) || 0;
             const compagnie = document.getElementById('compagnie').value;
             const typeAssurance = document.getElementById('typeAssurance').value;
+
+            // Indice visuel sur le champ Accessoires (visible dès que GNA est sélectionné)
+            const hintAccessoireGNA = document.getElementById('hintAccessoireGNA');
+            if (hintAccessoireGNA) {
+                hintAccessoireGNA.style.display = (compagnie === 'GNA') ? 'inline' : 'none';
+            }
 
             // Commissions (pour information - seront reversées par compagnie)
             if (compagnie && typeAssurance && primeNette !== 0) {
@@ -2614,8 +3082,14 @@
                 if (typeAssurance !== 'MALADIE') {
                     bonus = primeNette * (tauxBonus / 100);  // Bonus calculé sur prime nette
                 }
+
+                // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission
+                let commissionAccessoireGNA = 0;
+                if (compagnie === 'GNA') {
+                    commissionAccessoireGNA = accessoires * 0.5;
+                }
                 
-                const commissionTotale = commissionBase + bonus;
+                const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
 
                 // Afficher
                 document.getElementById('commissionDisplay').style.display = 'block';
@@ -2628,6 +3102,13 @@
                     document.getElementById('displayBonus').textContent = formatMontant(bonus) + ' (' + tauxBonus + '%)';
                 } else {
                     document.getElementById('rowBonus').style.display = 'none';
+                }
+
+                if (commissionAccessoireGNA > 0) {
+                    document.getElementById('rowCommissionAccessoireGNA').style.display = 'flex';
+                    document.getElementById('displayCommissionAccessoireGNA').textContent = formatMontant(commissionAccessoireGNA);
+                } else {
+                    document.getElementById('rowCommissionAccessoireGNA').style.display = 'none';
                 }
 
                 document.getElementById('displayCommissionTotale').textContent = formatMontant(commissionTotale);
@@ -2695,8 +3176,14 @@
             if (typeAssurance !== 'MALADIE') {
                 bonus = primeNette * (tauxBonus / 100);
             }
+
+            // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission par GNA
+            let commissionAccessoireGNA = 0;
+            if (compagnie === 'GNA') {
+                commissionAccessoireGNA = accessoires * 0.5;
+            }
             
-            const commissionTotale = commissionBase + bonus;
+            const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
             
             // RÈGLE SPÉCIALE : 2ACI - Commission déduite automatiquement
             const commissionDeduite = (compagnie === '2ACI');
@@ -2722,6 +3209,7 @@
                 tauxBonus,
                 commissionBase,
                 bonus,
+                commissionAccessoireGNA,   // ← NOUVEAU v3.1.0 : 50% des accessoires GNA
                 commissionTotale,
                 commissionDeduite,      // ← NOUVEAU
                 primeAReverser,         // ← NOUVEAU
@@ -2982,9 +3470,9 @@
 
             // Filtrer par statut et archivage
             if (affichage === 'non_regles_actifs') {
-                contratsFiltres = contratsFiltres.filter(c => !c.regle && !c.archive);
+                contratsFiltres = contratsFiltres.filter(c => !c.regle && !c.archive && !c.bdx_genere);  // ✅ v3.0.7 : Exclure bdx_genere
             } else if (affichage === 'tous_actifs') {
-                contratsFiltres = contratsFiltres.filter(c => !c.archive);
+                contratsFiltres = contratsFiltres.filter(c => !c.archive && !c.bdx_genere);  // ✅ v3.0.7 : Exclure bdx_genere
             } else if (affichage === 'regles_actifs') {
                 contratsFiltres = contratsFiltres.filter(c => c.regle && !c.archive);
             } else if (affichage === 'archives') {
@@ -3181,21 +3669,31 @@
                 return;
             }
 
-            if (confirm(`Archiver ${window.contratsSelectionnes.size} contrat(s) ?\n\nLes contrats archivés ne seront plus affichés par défaut mais resteront accessibles via le filtre "Archivés".`)) {
+            const nombreArchives = window.contratsSelectionnes.size;
+            
+            if (confirm(`Archiver ${nombreArchives} contrat(s) ?
+
+Les contrats archivés seront marqués comme traités (BDX généré) et disparaîtront de "Générer BDX".`)) {
                 contrats.forEach(c => {
                     if (window.contratsSelectionnes.has(c.id)) {
                         c.archive = true;
+                        c.bdx_genere = true;  // ✅ v3.0.7 : Marquer comme traité
                     }
                 });
 
-                sauvegarderDonnees();
+                // ✅ v3.0.7 : Sauvegarder IMMÉDIATEMENT à Firebase
+                console.log(`🚀 v3.0.7 : Archivage de ${nombreArchives} contrat(s)...`);
+                sauvegarderDonneesCloudImmediatement();
+                
                 window.contratsSelectionnes.clear();
                 filtrerContratsBDX();
                 afficherHistorique();
                 
-                alert('✅ Contrats archivés');
+                console.log(`✅ v3.0.7 : ${nombreArchives} contrats archivés et SAUVEGARDÉS à Firebase`);
+                alert(`✅ ${nombreArchives} contrats archivés et sauvegardés à Firebase`);
             }
         }
+
 
         function desarchiverContrat(id) {
             const contrat = contrats.find(c => c.id === id);
@@ -3261,25 +3759,60 @@
             }
 
 
-            const tableData = contratsSelectionnesArray.map(c => [
-                c.nomClient,
-                c.police,
-                c.immatriculation || '-',
-                c.typeAssurance,
-                new Date(c.dateEffet).toLocaleDateString('fr-FR'), // Date Effet
-                new Date(c.dateEcheance).toLocaleDateString('fr-FR'), // Date Échéance
-                formatMontantPDF(c.primeNette),
-                formatMontantPDF(c.primeTTC),
-                formatMontantPDF(c.commissionBase),
-                formatMontantPDF(c.bonus),
-                formatMontantPDF(c.commissionTotale),
-                formatMontantPDF(c.primeAReverser || c.primeTTC)  // Prime à reverser (commission déduite si 2ACI)
-            ]);
+            // ✅ v3.1.0 : Colonne "Com. Access." ajoutée UNIQUEMENT si le BDX ne concerne que GNA
+            // (évite de modifier la mise en page des BDX des autres compagnies)
+            const isGNA = contratsSelectionnesArray.length > 0 && contratsSelectionnesArray.every(c => c.compagnie === 'GNA');
+
+            const tableData = contratsSelectionnesArray.map(c => {
+                const ligne = [
+                    c.nomClient,
+                    c.police,
+                    c.immatriculation || '-',
+                    c.typeAssurance,
+                    new Date(c.dateEffet).toLocaleDateString('fr-FR'), // Date Effet
+                    new Date(c.dateEcheance).toLocaleDateString('fr-FR'), // Date Échéance
+                    formatMontantPDF(c.primeNette),
+                    formatMontantPDF(c.primeTTC),
+                    formatMontantPDF(c.commissionBase),
+                    formatMontantPDF(c.bonus)
+                ];
+                if (isGNA) {
+                    ligne.push(formatMontantPDF(c.commissionAccessoireGNA || 0));
+                }
+                ligne.push(formatMontantPDF(c.commissionTotale));
+                ligne.push(formatMontantPDF(c.primeAReverser || c.primeTTC)); // Prime à reverser (commission déduite si 2ACI)
+                return ligne;
+            });
+
+            const bdxHead = ['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus'];
+            if (isGNA) bdxHead.push('Com. Access.');
+            bdxHead.push('Total Com.', 'Prime à Reverser');
+
+            const bdxColumnStyles = {
+                0: { halign: 'left', cellWidth: 22 },
+                1: { halign: 'left', cellWidth: 24 },
+                2: { halign: 'center', cellWidth: 14 },
+                3: { halign: 'center', cellWidth: 12 },
+                4: { halign: 'center', cellWidth: 17 },
+                5: { halign: 'center', cellWidth: 17 },
+                6: { halign: 'right', cellWidth: 19 },
+                7: { halign: 'right', cellWidth: 19 },
+                8: { halign: 'right', cellWidth: 17 },
+                9: { halign: 'right', cellWidth: 14 }
+            };
+            if (isGNA) {
+                bdxColumnStyles[10] = { halign: 'right', cellWidth: 17 }; // Com. Access.
+                bdxColumnStyles[11] = { halign: 'right', cellWidth: 17 }; // Total Com.
+                bdxColumnStyles[12] = { halign: 'right', cellWidth: 19 }; // Prime à Reverser
+            } else {
+                bdxColumnStyles[10] = { halign: 'right', cellWidth: 18 }; // Total Com.
+                bdxColumnStyles[11] = { halign: 'right', cellWidth: 20 }; // Prime à Reverser
+            }
 
             doc.autoTable({
                 startY: 55,
-                head: [['Client', 'Police', 'Immat.', 'Type', 'Date Effet', 'Date Échéance', 'Prime Nette', 'Prime TTC', 'Commission', 'Bonus', 'Total Com.', 'Prime à Reverser']],
-                body: tableData,
+                head: [bdxHead],
+                body: tableData.slice(0, Math.min(7, tableData.length)), // PAGINATION v2.9.8 : MAX 7 lignes page 1
                 theme: 'grid',
                 orientation: 'landscape',
                 margin: { left: 10, right: 10, top: 55, bottom: 20 },
@@ -3305,24 +3838,62 @@
                     textColor: [0, 0, 0],
                     valign: 'middle'
                 },
-                columnStyles: {
-                    0: { halign: 'left', cellWidth: 22 },      // Client
-                    1: { halign: 'left', cellWidth: 25 },      // Police
-                    2: { halign: 'center', cellWidth: 15 },    // Immat
-                    3: { halign: 'center', cellWidth: 13 },    // Type
-                    4: { halign: 'center', cellWidth: 18 },    // Date Effet
-                    5: { halign: 'center', cellWidth: 18 },    // Date Échéance
-                    6: { halign: 'right', cellWidth: 20 },     // Prime Nette
-                    7: { halign: 'right', cellWidth: 20 },     // Prime TTC
-                    8: { halign: 'right', cellWidth: 18 },     // Commission
-                    9: { halign: 'right', cellWidth: 15 },     // Bonus
-                    10: { halign: 'right', cellWidth: 18 },    // Total Com.
-                    11: { halign: 'right', cellWidth: 20 }     // Prime à Reverser
-                }
+                columnStyles: bdxColumnStyles
             });
+
+            // PAGINATION v2.9.8 : Si > 7 contrats, ajouter les suivants sur page suivante
+            if (tableData.length > 7) {
+                doc.addPage();
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'bold');
+                doc.text(`N° BDX: ${numeroBDX} (suite)`, 20, 30);
+                
+                // Boucler par 7 contrats par page
+                for (let i = 7; i < tableData.length; i += 7) {
+                    if (i > 7) {
+                        doc.addPage();
+                        doc.setFontSize(10);
+                        doc.setFont(undefined, 'bold');
+                        doc.text(`N° BDX: ${numeroBDX} (suite)`, 20, 30);
+                    }
+                    
+                    doc.autoTable({
+                        startY: 40,
+                        head: [bdxHead],
+                        body: tableData.slice(i, Math.min(i + 7, tableData.length)),
+                        theme: 'grid',
+                        orientation: 'landscape',
+                        margin: { left: 10, right: 10, top: 40, bottom: 20 },
+                        headStyles: { 
+                            fillColor: [37, 99, 235],
+                            halign: 'center',
+                            valign: 'middle',
+                            fontSize: 8,
+                            fontStyle: 'bold',
+                            textColor: [255, 255, 255],
+                            lineWidth: 0.5,
+                            lineColor: [0, 0, 0],
+                            cellPadding: 2,
+                            overflow: 'linebreak'
+                        },
+                        styles: { 
+                            fontSize: 7,
+                            fontStyle: 'normal',
+                            halign: 'right',
+                            cellPadding: 2,
+                            lineWidth: 0.3,
+                            lineColor: [100, 100, 100],
+                            textColor: [0, 0, 0],
+                            valign: 'middle'
+                        },
+                        columnStyles: bdxColumnStyles
+                    });
+                }
+            }
 
             const totalPrimeTTC = contratsSelectionnesArray.reduce((sum, c) => sum + c.primeTTC, 0);
             const totalCommission = contratsSelectionnesArray.reduce((sum, c) => sum + c.commissionTotale, 0);
+            const totalCommissionAccessoireGNA = contratsSelectionnesArray.reduce((sum, c) => sum + (c.commissionAccessoireGNA || 0), 0);
             const finalY = doc.lastAutoTable.finalY + 12;
             
             // Totaux centrés en mode paysage
@@ -3333,6 +3904,13 @@
             doc.setFontSize(12);
             doc.setFont(undefined, 'bold');
             doc.text(`Commission totale à recevoir : ${formatMontantPDF(totalCommission, true)}`, 148.5, finalY + 10, { align: 'center' });
+
+            // ✅ v3.1.0 : Ligne visible "dont Commission Accessoire GNA" si applicable
+            if (isGNA && totalCommissionAccessoireGNA > 0) {
+                doc.setFontSize(10);
+                doc.setFont(undefined, 'normal');
+                doc.text(`(dont Commission Accessoire GNA 50% : ${formatMontantPDF(totalCommissionAccessoireGNA, true)})`, 148.5, finalY + 17, { align: 'center' });
+            }
 
             // Sauvegarder le BDX pour génération courrier
             const totalCommissionBase = contratsSelectionnesArray.reduce((sum, c) => sum + c.commissionBase, 0);
@@ -3351,6 +3929,7 @@
                 primeTotale: totalPrimeTTC,
                 commissionBase: totalCommissionBase,
                 bonus: totalBonus,
+                commissionAccessoireGNA: totalCommissionAccessoireGNA,
                 numerosPolice: numerosPolice,
                 dateGeneration: new Date().toISOString()
             });
@@ -3361,6 +3940,99 @@
         // ============================================
         // HISTORIQUE
         // ============================================
+        
+        /**
+         * Exporter les BDX sélectionnés en Excel
+         */
+        function exporterBDXExcel() {
+            const numeroBDX = document.getElementById('numeroBDX').value;
+            if (!numeroBDX) {
+                alert('⚠️ Veuillez saisir un numéro de bordereau');
+                return;
+            }
+
+            if (!window.contratsSelectionnes || window.contratsSelectionnes.size === 0) {
+                alert('⚠️ Aucun contrat sélectionné');
+                return;
+            }
+
+            try {
+                const contratsSelectionnesArray = contrats.filter(c => window.contratsSelectionnes.has(c.id));
+                const compagnie = document.getElementById('bdxCompagnie').value || 'Toutes';
+                const dateGeneration = new Date().toLocaleDateString('fr-FR');
+
+                // Préparer les données
+                const donnees = [];
+                
+                // En-tête
+                donnees.push(['BORDEREAU DE RÈGLEMENT']);
+                donnees.push(['Premium Courtage Assur - N° 211 MEF/DGTCP/DA']);
+                donnees.push(['']);
+                donnees.push([`N° BDX: ${numeroBDX}`, '', '', '', `Date: ${dateGeneration}`]);
+                donnees.push([`Compagnie: ${compagnie}`]);
+                donnees.push(['']);
+                
+                // En-têtes colonnes
+                donnees.push(['#', 'Client', 'Police', 'Immatriculation', 'Compagnie', 'Type', 'Prime Nette', 'Taxe', 'Prime TTC', 'Commission', 'À Verser']);
+                
+                // Données des contrats
+                let totalPrimeNette = 0, totalTaxe = 0, totalPrimeTTC = 0, totalCommission = 0, totalAVerser = 0;
+                
+                contratsSelectionnesArray.forEach((contrat, idx) => {
+                    donnees.push([
+                        idx + 1,
+                        contrat.nomClient,
+                        contrat.numeroPolice,
+                        contrat.immatriculation,
+                        contrat.compagnie,
+                        contrat.typeAssurance,
+                        contrat.primeNette || 0,
+                        contrat.taxe || 0,
+                        contrat.primeTTC || 0,
+                        contrat.commissionTotale || 0,
+                        (contrat.primeTTC || 0) - (contrat.commissionTotale || 0)
+                    ]);
+                    
+                    totalPrimeNette += contrat.primeNette || 0;
+                    totalTaxe += contrat.taxe || 0;
+                    totalPrimeTTC += contrat.primeTTC || 0;
+                    totalCommission += contrat.commissionTotale || 0;
+                    totalAVerser += (contrat.primeTTC || 0) - (contrat.commissionTotale || 0);
+                });
+                
+                // Totaux
+                donnees.push(['', '', '', '', '', 'TOTAL', totalPrimeNette, totalTaxe, totalPrimeTTC, totalCommission, totalAVerser]);
+                
+                // Créer le workbook
+                const ws = XLSX.utils.aoa_to_sheet(donnees);
+                const wb = XLSX.utils.book_new();
+                XLSX.utils.book_append_sheet(wb, ws, "BDX");
+                
+                // Formater les colonnes
+                ws['!cols'] = [
+                    { wch: 5 },  // #
+                    { wch: 20 }, // Client
+                    { wch: 15 }, // Police
+                    { wch: 15 }, // Immatriculation
+                    { wch: 12 }, // Compagnie
+                    { wch: 12 }, // Type
+                    { wch: 12 }, // Prime Nette
+                    { wch: 10 }, // Taxe
+                    { wch: 12 }, // Prime TTC
+                    { wch: 12 }, // Commission
+                    { wch: 12 }  // À Verser
+                ];
+                
+                // Télécharger
+                const filename = `BDX_${numeroBDX}_${dateGeneration}.xlsx`;
+                XLSX.writeFile(wb, filename);
+                
+                alert(`✅ BDX exporté en Excel : ${filename}`);
+            } catch (error) {
+                console.error('Erreur export Excel:', error);
+                alert(`❌ Erreur lors de l'export : ${error.message}`);
+            }
+        }
         
         function afficherHistorique() {
             const nbContrats = contrats.length;
@@ -3810,6 +4482,7 @@
                 numeroBDX: bdx.numeroBDX,
                 commission: formatMontantSimple(bdx.commissionBase),
                 bonus: formatMontantSimple(bdx.bonus),
+                commissionAccessoireGNA: formatMontantSimple(bdx.commissionAccessoireGNA || 0),
                 commissionDeduite: commissionDeduite
             });
             
@@ -3973,7 +4646,10 @@
                         new Paragraph({
                             children: [
                                 new TextRun({
-                                    text: `Merci par la même occasion de régler notre commission de ${data.commission} F CFA et bonus de ${data.bonus} F CFA s'y rapportant.`,
+                                    // ✅ v3.1.0 : Mention Commission Accessoire GNA (50%) si compagnie GNA et montant > 0
+                                    text: (data.compagnie === 'GNA' && data.commissionAccessoireGNA && data.commissionAccessoireGNA !== "0")
+                                        ? `Merci par la même occasion de régler notre commission de ${data.commission} F CFA, bonus de ${data.bonus} F CFA et commission accessoire de ${data.commissionAccessoireGNA} F CFA (50% des accessoires) s'y rapportant.`
+                                        : `Merci par la même occasion de régler notre commission de ${data.commission} F CFA et bonus de ${data.bonus} F CFA s'y rapportant.`,
                                     size: 24,
                                 }),
                             ],
@@ -4117,6 +4793,61 @@
         /**
          * Sauvegarder les taux modifiés
          */
+        // ✅ v3.0.8 : SYNCHRONISATION TAUX À FIREBASE
+        function sauvegarderTauxAFirebase(taux) {
+            if (!firebaseDb) {
+                console.warn('⚠️ v3.0.8 : Firebase non disponible');
+                return;
+            }
+            
+            console.log(`📤 v3.0.8 : Envoi des taux modifiés à Firebase...`);
+            
+            const donneesTaux = {
+                commission: taux.commission,
+                bonus: taux.bonus,
+                dateModification: taux.dateModification,
+                modifiePar: utilisateurConnecte || 'inconnu'
+            };
+            
+            firebaseDb.ref('pca/taux_personnalises').set(donneesTaux)
+                .then(() => {
+                    console.log(`✅✅ v3.0.8 : Taux SAUVEGARDÉS à Firebase ✅✅`);
+                    console.log(`✅✅ Les modifications sont maintenant SYNCHRONISÉES ! ✅✅`);
+                    mettreAJourLEDFirebase('connected', 'Synchronisé');
+                })
+                .catch(err => {
+                    console.error(`❌ v3.0.8 ERREUR : ${err.message}`);
+                    console.error(`❌ Les taux n'ont pas pu être sauvegardés à Firebase !`);
+                    mettreAJourLEDFirebase('error', 'Erreur sync taux');
+                });
+        }
+        
+        // ✅ v3.0.8 : CHARGER TAUX DEPUIS FIREBASE AU DÉMARRAGE
+        function chargerTauxDepuisFirebase() {
+            if (!firebaseDb) return;
+            
+            console.log(`📥 v3.0.8 : Chargement des taux depuis Firebase...`);
+            
+            firebaseDb.ref('pca/taux_personnalises').once('value', (snapshot) => {
+                const tauxCloud = snapshot.val();
+                
+                if (tauxCloud && tauxCloud.commission && tauxCloud.bonus) {
+                    // Charger depuis Firebase (priorité)
+                    Object.assign(TAUX_COMMISSION, tauxCloud.commission);
+                    Object.assign(TAUX_BONUS, tauxCloud.bonus);
+                    
+                    console.log(`✅ v3.0.8 : Taux chargés depuis Firebase`);
+                } else {
+                    // Si Firebase vide, charger depuis localStorage
+                    console.log(`ℹ️ v3.0.8 : Firebase n'a pas de taux, utilisation localStorage`);
+                    chargerTauxPersonnalises();
+                }
+            }).catch(err => {
+                console.warn(`⚠️ v3.0.8 : Erreur Firebase, utilisation localStorage : ${err.message}`);
+                chargerTauxPersonnalises();
+            });
+        }
+        
         function sauvegarderTaux() {
             if (!confirm('⚠️ ATTENTION\n\nCette action va :\n- Modifier tous les taux de commission et bonus\n- Sauvegarder les nouvelles valeurs\n- Les nouveaux taux seront appliqués aux NOUVEAUX contrats uniquement\n\nVoulez-vous continuer ?')) {
                 return;
@@ -4160,6 +4891,9 @@
             localStorage.setItem('taux_personnalises', JSON.stringify(tauxAEnregistrer));
             
             console.log(`✅ ${nbModifications} taux modifiés et sauvegardés`);
+            
+            // ✅ v3.0.8 : Sauvegarder à Firebase IMMÉDIATEMENT
+            sauvegarderTauxAFirebase(tauxAEnregistrer);
             
             // Actualiser l'affichage
             afficherTableauTaux();
@@ -4342,6 +5076,11 @@
         window.onload = function() {
             chargerTauxPersonnalises();
             init();
+            
+            // ✅ v3.0.8 : Charger taux depuis Firebase (synchronisation)
+            setTimeout(() => {
+                chargerTauxDepuisFirebase();
+            }, 1000);  // Attendre que Firebase soit initialisé
         };
     </script>
     <!-- MODALE RÈGLEMENT -->
@@ -4618,7 +5357,7 @@
     const FIREBASE_CONFIG = {
         apiKey: "AIzaSyDrZqaNt_nKHZpi6jgaoETEVqz0oRFeIx0",
         authDomain: "premium-bdx-app.firebaseapp.com",
-        databaseURL: "https://premium-bdx-app.firebaseio.com",
+        databaseURL: "https://premium-bdx-app-default-rtdb.europe-west1.firebasedatabase.app",
         projectId: "premium-bdx-app",
         storageBucket: "premium-bdx-app.appspot.com",
         messagingSenderId: "123456789",
@@ -4627,21 +5366,85 @@
     
     // Utilisateurs autorisés (DEMO)
     const UTILISATEURS_AUTORISE = {
-        'gaston@premium.com': 'password',
-        'yolande@premium.com': 'yolande123',
-        'mariette@premium.com': 'mariette123'
+        'gaston@premium.com': 'Gaston2026',
+        'yolande@premium.com': 'Yolande2026',
+        'mariette@premium.com': 'Mariette2026'
     };
     
+    // Rôles utilisateurs (définit accès application)
+    const ROLES_UTILISATEURS = {
+        'gaston@premium.com': 'ADMINISTRATEUR',    // v2.9.10 : Admin - gère tout
+        'mariette@premium.com': 'ÉDITEUR',         // v2.9.10 : Éditeur - saisit et modifie
+        'yolande@premium.com': 'LECTEUR'           // v2.9.10 : Lecteur - consulte seulement
+    };
+    
+    // v2.9.10 : Fonction pour vérifier les permissions
+    function aLaPermission(permission) {
+        if (!roleUtilisateur) return false;
+        
+        if (permission === 'saisir') {
+            return roleUtilisateur !== 'LECTEUR';
+        }
+        if (permission === 'modifier') {
+            return roleUtilisateur !== 'LECTEUR';
+        }
+        if (permission === 'admin') {
+            return roleUtilisateur === 'ADMINISTRATEUR';
+        }
+        
+        return true;
+    }
+    
     let utilisateurConnecte = null;
+    let roleUtilisateur = null;
     let firebaseDb = null;
     
     /**
      * Initialiser Firebase (appelé après login)
      */
+    /**
+     * Mettre à jour l'indicateur LED Firebase
+     */
+    function mettreAJourLEDFirebase(etat, message) {
+        const led = document.getElementById('firebaseLed');
+        const tooltip = document.getElementById('firebaseTooltip');
+        
+        if (!led) return;
+        
+        // Réinitialiser les classes
+        led.className = 'firebase-led';
+        
+        // Appliquer le nouvel état
+        switch(etat) {
+            case 'connected':
+                led.classList.add('connected');
+                tooltip.textContent = `✅ ${message || 'Synchronisé avec Firebase'}`;
+                break;
+            case 'offline':
+                led.classList.add('offline');
+                tooltip.textContent = `⚠️ ${message || 'Mode hors ligne (données locales)'}`;
+                break;
+            case 'error':
+                led.classList.add('error');
+                tooltip.textContent = `❌ ${message || 'Erreur Firebase'}`;
+                break;
+            case 'connecting':
+                led.classList.add('connecting');
+                tooltip.textContent = `🔄 ${message || 'Connexion...'}`;
+                break;
+        }
+    }
+    
+    /**
+     * Initialiser Firebase
+     */
     function initialiserFirebase() {
         try {
+            mettreAJourLEDFirebase('connecting', 'Initialisation...');
+            
             if (typeof firebase === 'undefined') {
                 console.warn('⚠️ Firebase SDK pas encore chargé, réessai...');
+                mettreAJourLEDFirebase('connecting', 'Chargement SDK...');
                 setTimeout(initialiserFirebase, 500);
                 return;
             }
@@ -4649,6 +5452,7 @@
             if (firebase.apps && firebase.apps.length > 0) {
                 console.log('✅ Firebase déjà initialisé');
                 firebaseDb = firebase.database();
+                mettreAJourLEDFirebase('connected', 'Connecté');
                 synchroniserDonneesCloud();
                 return;
             }
@@ -4657,9 +5461,11 @@
             firebase.initializeApp(FIREBASE_CONFIG);
             firebaseDb = firebase.database();
             console.log('✅ Firebase initialisé');
+            mettreAJourLEDFirebase('connected', 'Connecté');
             synchroniserDonneesCloud();
         } catch (error) {
             console.warn('⚠️ Firebase non disponible (mode offline)', error.message);
+            mettreAJourLEDFirebase('offline', 'Mode hors ligne');
             chargerDonneesLocales();
         }
     }
@@ -4687,19 +5493,37 @@
         
         // Connexion réussie
         utilisateurConnecte = email;
+        roleUtilisateur = ROLES_UTILISATEURS[email] || 'utilisateur';
         localStorage.setItem('utilisateur', email);
         localStorage.setItem('nomUtilisateur', email.split('@')[0]);
+        localStorage.setItem('roleUtilisateur', roleUtilisateur);
         
         // Afficher interface
         document.getElementById('loginScreen').style.display = 'none';
         document.getElementById('appContainer').style.display = 'block';
         document.getElementById('userInfo').style.display = 'flex';
-        document.getElementById('userName').textContent = email.split('@')[0].toUpperCase();
+        document.getElementById('userName').textContent = email.split('@')[0].toUpperCase() + ' (' + roleUtilisateur + ')';
         
         // Initialiser app
         initialiserFirebase();
+        
+        // v3.0.3 : CHARGER FIREBASE EN PRIORITÉ, puis localStorage, puis ENVOYER DE FORCE
+        console.log('🔄 v3.0.3 : Démarrage robuste...');
+        
+        // Étape 1 : Charger les données locales en mémoire
         chargerDonneesLocales();
-        console.log(`✅ Connecté : ${email}`);
+        const contratsLocaux = [...contrats];
+        console.log(`📦 Locales chargées : ${contratsLocaux.length} contrats`);
+        
+        // Étape 2 : Charger depuis Firebase
+        setTimeout(() => {
+            chargerDepuisFirebaseEnPrioriteFinal();
+        }, 500);
+        
+        // v2.9.10 : Initialiser les permissions
+        initialiserPermissionsV2910();
+        
+        console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateur}`);
     }
     
     /**
@@ -4729,16 +5553,20 @@
     function synchroniserDonneesCloud() {
         if (!firebaseDb) return;
         
-        const chemin = `utilisateurs/${utilisateurConnecte}`;
+        // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs (Gaston, Mariette, Yolande)
+        const cheminPartage = 'pca/bdx_donnees';
         
-        // Écouter changements cloud
-        firebaseDb.ref(chemin).on('value', (snapshot) => {
+        console.log(`🔄 Écoute Firebase : ${cheminPartage}`);
+        
+        // Écouter changements cloud en TEMPS RÉEL
+        firebaseDb.ref(cheminPartage).on('value', (snapshot) => {
             const donnees = snapshot.val();
             if (donnees) {
                 contrats = donnees.contrats || [];
                 bdxGeneres = donnees.bdxGeneres || [];
-                console.log('✅ Données synchronisées depuis cloud');
-                actualiserAffichage();
+                console.log(`✅ ${contrats.length} contrats synchronisés depuis cloud`);
+                filtrerContratsBDX();
+                mettreAJourLEDFirebase('connected', 'Synchronisé');
             }
         });
         
@@ -4749,24 +5577,73 @@
     }
     
     /**
+     * Forcer la synchronisation immédiate avec Firebase
+     */
+    function forcerSynchronisation() {
+        if (!firebaseDb) {
+            alert('❌ Firebase non connecté');
+            return;
+        }
+
+        alert('🔄 Synchronisation en cours...');
+        console.log('🔄 FORCE SYNC : Envoi des données à Firebase...');
+        
+        // Forcer l'écriture
+        sauvegarderDonneesCloud();
+        
+        // Attendre 2 secondes puis actualiser depuis Firebase
+        setTimeout(() => {
+            synchroniserDonneesCloud();
+            alert('✅ Synchronisation terminée !\n\nLes données ont été synchronisées avec Firebase.\nActualisez la page chez les autres utilisateurs (F5) pour voir les changements.');
+        }, 2000);
+    }
+
+    /**
      * Sauvegarder données sur Firebase Cloud
      */
     function sauvegarderDonneesCloud() {
-        if (!firebaseDb || !utilisateurConnecte) return;
+        if (!firebaseDb || !utilisateurConnecte) {
+            console.warn('❌ v3.0.3 : Firebase ou utilisateur non disponible');
+            return;
+        }
         
         try {
             const donnees = {
                 contrats: contrats,
                 bdxGeneres: bdxGeneres,
                 derniereMiseAJour: new Date().toISOString(),
-                utilisateur: utilisateurConnecte
+                utilisateur: utilisateurConnecte,
+                dernierModificationPar: utilisateurConnecte.split('@')[0]
             };
             
-            firebaseDb.ref(`utilisateurs/${utilisateurConnecte}`).set(donnees)
-                .then(() => console.log('☁️ Données sauvegardées cloud'))
-                .catch(err => console.warn('⚠️ Erreur cloud:', err.message));
+            // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs
+            const cheminPartage = 'pca/bdx_donnees';
+            
+            if (contrats.length === 0) {
+                console.warn('⚠️ v3.0.3 : Pas de contrats à envoyer');
+                return;
+            }
+            
+            console.log(`📤 v3.0.3 : Envoi de ${contrats.length} contrats à Firebase via chemin: ${cheminPartage}...`);
+            
+            firebaseDb.ref(cheminPartage).set(donnees)
+                .then(() => {
+                    console.log(`✅✅ v3.0.3 : ${contrats.length} contrats SAUVEGARDÉS à Firebase ✅✅`);
+                    console.log(`✅✅ Les données sont SÛRES - vous pouvez vider le cache ! ✅✅`);
+                    mettreAJourLEDFirebase('connected', 'Synchronisé');
+                })
+                .catch(err => {
+                    console.error(`❌ v3.0.3 ERREUR CRITIQUE : ${err.message}`);
+                    console.error(`❌ Les données NE SONT PAS à Firebase !`);
+                    console.error(`❌ Vérifiez:`);
+                    console.error(`   1. Les règles Firebase permettent l'écriture`);
+                    console.error(`   2. Le chemin 'pca/bdx_donnees' est correct`);
+                    console.error(`   3. La connexion Firebase fonctionne`);
+                    mettreAJourLEDFirebase('error', 'Erreur de sync');
+                });
         } catch (error) {
-            console.warn('⚠️ Erreur sauvegarde cloud:', error.message);
+            console.error('❌ Erreur sauvegarde:', error.message);
+            mettreAJourLEDFirebase('offline', 'Erreur');
         }
     }
     
@@ -4781,7 +5658,7 @@
                 contrats = parsed.contrats || [];
                 bdxGeneres = parsed.bdxGeneres || [];
                 console.log('✅ Données locales chargées');
-                actualiserAffichage();
+                filtrerContratsBDX();
             }
         } catch (error) {
             console.error('❌ Erreur chargement données:', error);
@@ -4835,7 +5712,7 @@
                         sauvegarderDonneesCloud();
                         
                         actualiserListeContrats();
-                        actualiserAffichage();
+                        filtrerContratsBDX();
                         
                         alert('✅ Données importées avec succès !');
                         console.log(`✅ ${backup.contrats.length} contrats importés`);
@@ -4850,9 +5727,361 @@
     }
     
     /**
+     * Importer BDX depuis fichier Excel/CSV
+     */
+    function importerBDXExcel(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const fileName = file.name.toLowerCase();
+        
+        if (fileName.endsWith('.csv')) {
+            importerBDXCSV(file);
+        } else if (fileName.endsWith('.xlsx') || fileName.endsWith('.xls')) {
+            importerBDXExcelFile(file);
+        } else {
+            alert('❌ Format non supporté. Utilisez CSV ou Excel (.xlsx)');
+        }
+        
+        // Réinitialiser le fichier d'entrée
+        event.target.value = '';
+    }
+    
+    /**
+     * Importer BDX depuis CSV
+     */
+    function importerBDXCSV(file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const csv = event.target.result;
+                const lines = csv.split('\n');
+                
+                if (lines.length < 2) {
+                    alert('❌ Fichier CSV vide ou invalide');
+                    return;
+                }
+                
+                // En-têtes - Détecter automatiquement le séparateur
+                let separator = ',';
+                if (lines[0].includes(';') && !lines[0].includes(',')) {
+                    separator = ';';
+                } else if (lines[0].includes('\t') && !lines[0].includes(',') && !lines[0].includes(';')) {
+                    separator = '\t';
+                }
+                const headers = lines[0].split(separator).map(h => h.trim());
+                const contractsImportes = [];
+                let errors = [];
+                
+                // Vérifier colonnes obligatoires
+                const colonnesObligatoires = ['compagnie', 'typeAssurance', 'nomClient', 'police', 'dateEffet', 'dateEcheance', 'primeNette', 'taxe', 'primeTTC'];
+                const colonnesManquantes = colonnesObligatoires.filter(col => !headers.includes(col));
+                
+                if (colonnesManquantes.length > 0) {
+                    alert(`❌ Colonnes manquantes : ${colonnesManquantes.join(', ')}`);
+                    return;
+                }
+                
+                // Traiter chaque ligne
+                for (let i = 1; i < lines.length; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+                    
+                    const values = line.split(separator).map(v => v.trim());
+                    const row = {};
+                    
+                    headers.forEach((header, idx) => {
+                        row[header] = values[idx] || '';
+                    });
+                    
+                    try {
+                        const contrat = traiterLigneImportBDX(row, i + 1);
+                        if (contrat) {
+                            contractsImportes.push(contrat);
+                        }
+                    } catch (error) {
+                        errors.push(`Ligne ${i + 1} : ${error.message}`);
+                    }
+                }
+                
+                // Confirmation et import
+                if (contractsImportes.length > 0) {
+                    const msg = `Importer ${contractsImportes.length} BDX ?${errors.length > 0 ? `\n\n⚠️ ${errors.length} erreur(s) ignorées` : ''}`;
+                    
+                    if (confirm(msg)) {
+                        // Ajouter les contrats importés
+                        contrats = [...contrats, ...contractsImportes];
+                        sauvegarderDonnees();
+                        sauvegarderDonneesCloud();
+                        
+                        actualiserListeContrats();
+                        filtrerContratsBDX();
+                        
+                        let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
+                        if (errors.length > 0) {
+                            msgSuccess += `\n\n⚠️ ${errors.length} lignes ignorées :\n${errors.slice(0, 5).join('\n')}`;
+                            if (errors.length > 5) msgSuccess += `\n... et ${errors.length - 5} autres`;
+                        }
+                        
+                        alert(msgSuccess);
+                        console.log(`✅ ${contractsImportes.length} BDX importés`);
+                    }
+                } else {
+                    alert('❌ Aucun BDX valide trouvé');
+                }
+            } catch (error) {
+                alert('❌ Erreur lors de la lecture du fichier :\n' + error.message);
+            }
+        };
+        reader.readAsText(file);
+    }
+    
+    /**
+     * Importer BDX depuis Excel
+     */
+    function importerBDXExcelFile(file) {
+        // Vérifier si SheetJS est disponible
+        if (typeof XLSX === 'undefined') {
+            // Charger SheetJS dynamiquement avec CDN fiable
+            const script = document.createElement('script');
+            script.async = true;
+            
+            // Essayer unpkg d'abord (plus fiable), puis cdnjs, puis jsDelivr
+            const cdnUrls = [
+                'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js',
+                'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+                'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'
+            ];
+            
+            let cdnIndex = 0;
+            
+            script.onload = () => {
+                console.log('✅ SheetJS chargé avec succès');
+                lireExcelAvecXLSX(file);
+            };
+            
+            script.onerror = () => {
+                console.error(`❌ Erreur CDN ${cdnIndex + 1}/${cdnUrls.length}`);
+                
+                if (cdnIndex < cdnUrls.length - 1) {
+                    // Essayer prochain CDN
+                    cdnIndex++;
+                    script.src = cdnUrls[cdnIndex];
+                    console.log(`📡 Essai CDN suivant : ${cdnUrls[cdnIndex]}`);
+                    document.head.appendChild(script);
+                } else {
+                    // Tous les CDN ont échoué
+                    console.error('❌ Tous les CDN ont échoué');
+                    alert('❌ Impossible de charger la bibliothèque Excel.\n\nSolution : Utilisez plutôt le format CSV\n\n1. Ouvrir le fichier Excel dans votre application\n2. Fichier → Enregistrer sous\n3. Format : CSV (séparé par des virgules)\n4. Réimporter le fichier CSV');
+                }
+            };
+            
+            // Démarrer avec le premier CDN
+            script.src = cdnUrls[cdnIndex];
+            console.log(`📡 Chargement SheetJS depuis : ${cdnUrls[cdnIndex]}`);
+            document.head.appendChild(script);
+        } else {
+            lireExcelAvecXLSX(file);
+        }
+    }
+    
+    /**
+     * Lire Excel avec XLSX
+     */
+    function lireExcelAvecXLSX(file) {
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const workbook = XLSX.read(event.target.result, { type: 'binary' });
+                const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
+                const rows = XLSX.utils.sheet_to_json(firstSheet);
+                
+                if (rows.length === 0) {
+                    alert('❌ Feuille Excel vide');
+                    return;
+                }
+                
+                const contractsImportes = [];
+                let errors = [];
+                
+                // Traiter chaque ligne
+                rows.forEach((row, idx) => {
+                    try {
+                        const contrat = traiterLigneImportBDX(row, idx + 2);
+                        if (contrat) {
+                            contractsImportes.push(contrat);
+                        }
+                    } catch (error) {
+                        errors.push(`Ligne ${idx + 2} : ${error.message}`);
+                    }
+                });
+                
+                // Confirmation et import
+                if (contractsImportes.length > 0) {
+                    const msg = `Importer ${contractsImportes.length} BDX ?${errors.length > 0 ? `\n\n⚠️ ${errors.length} erreur(s) ignorées` : ''}`;
+                    
+                    if (confirm(msg)) {
+                        contrats = [...contrats, ...contractsImportes];
+                        sauvegarderDonnees();
+                        sauvegarderDonneesCloud();
+                        
+                        actualiserListeContrats();
+                        filtrerContratsBDX();
+                        
+                        let msgSuccess = `✅ ${contractsImportes.length} BDX importés avec succès !`;
+                        if (errors.length > 0) {
+                            msgSuccess += `\n\n⚠️ ${errors.length} lignes ignorées :\n${errors.slice(0, 5).join('\n')}`;
+                            if (errors.length > 5) msgSuccess += `\n... et ${errors.length - 5} autres`;
+                        }
+                        
+                        alert(msgSuccess);
+                    }
+                } else {
+                    alert('❌ Aucun BDX valide trouvé');
+                }
+            } catch (error) {
+                alert('❌ Erreur lors de la lecture du fichier Excel :\n' + error.message);
+            }
+        };
+        reader.readAsBinaryString(file);
+    }
+    
+    /**
+     * Traiter une ligne d'import BDX
+     */
+    function traiterLigneImportBDX(row, numeroLigne) {
+        // Valider compagnie
+        if (!row.compagnie || !COMPAGNIES.includes(row.compagnie)) {
+            throw new Error(`Compagnie invalide : "${row.compagnie}"`);
+        }
+        
+        // Valider type assurance
+        if (!row.typeAssurance) {
+            throw new Error('Type d\'assurance manquant');
+        }
+        
+        // Valider client
+        if (!row.nomClient) {
+            throw new Error('Nom client manquant');
+        }
+        
+        // Valider police
+        if (!row.police) {
+            throw new Error('N° police manquant');
+        }
+        
+        // Valider dates
+        const dateEffet = convertirDateBDX(row.dateEffet);
+        const dateEcheance = convertirDateBDX(row.dateEcheance);
+        
+        if (!dateEffet || !dateEcheance) {
+            throw new Error('Dates invalides (format attendu : JJ/MM/YYYY)');
+        }
+        
+        // Valider montants
+        const primeNette = parseInt(row.primeNette) || 0;
+        const taxe = parseInt(row.taxe) || 0;
+        const primeTTC = parseInt(row.primeTTC) || 0;
+        const montantPercu = parseInt(row.montantPercu) || primeTTC;
+        
+        if (primeNette <= 0 || primeTTC <= 0) {
+            throw new Error('Montants invalides (doivent être > 0)');
+        }
+        
+        // Récupérer taux commission
+        // ✅ v3.1.0 : CORRECTIF - le taux de commission dépend du TYPE D'ASSURANCE, pas de la compagnie
+        // (TAUX_COMMISSION n'a jamais eu de clés compagnie : ce lookup retombait toujours sur 20% par défaut)
+        let tauxCommission = TAUX_COMMISSION[row.typeAssurance] || 20;
+        const tauxBonus = TAUX_BONUS[row.compagnie] || 0;
+
+        // RÈGLE SPÉCIALE : PVT avec NSIA = 27% au lieu de 25% (alignée sur la saisie manuelle)
+        if (row.typeAssurance === 'PVT' && row.compagnie === 'NSIA') {
+            tauxCommission = 27;
+        }
+        
+        // Calculer commissions
+        // ✅ v3.1.0 : CORRECTIF - commission et bonus calculés sur la PRIME NETTE, jamais sur la Prime TTC ni sur la commission
+        const commissionBase = Math.round(primeNette * tauxCommission / 100);
+        let bonus = 0;
+        if (row.typeAssurance !== 'MALADIE') {
+            bonus = tauxBonus > 0 ? Math.round(primeNette * tauxBonus / 100) : 0;
+        }
+        // ✅ v3.1.0 : RÈGLE SPÉCIALE GNA - 50% des Accessoires reversés en commission
+        const accessoiresImport = parseInt(row.accessoires) || 0;
+        const commissionAccessoireGNA = (row.compagnie === 'GNA') ? Math.round(accessoiresImport * 0.5) : 0;
+        const commissionTotale = commissionBase + bonus + commissionAccessoireGNA;
+        
+        // Créer contrat
+        const contrat = {
+            id: Date.now() + Math.random(),
+            compagnie: row.compagnie,
+            typeAssurance: row.typeAssurance,
+            nomClient: row.nomClient,
+            police: row.police,
+            avenant: row.avenant || '',
+            immatriculation: row.immatriculation || '',
+            dateEffet: dateEffet,
+            dateEcheance: dateEcheance,
+            primeNette: primeNette,
+            accessoires: accessoiresImport,
+            taxe: taxe,
+            primeTTC: primeTTC,
+            montantPercu: montantPercu,
+            modeReglement: row.modeReglement || 'Cheque',
+            tauxCommission: tauxCommission,
+            tauxBonus: tauxBonus,
+            commissionBase: commissionBase,
+            bonus: bonus,
+            commissionAccessoireGNA: commissionAccessoireGNA,
+            commissionTotale: commissionTotale,
+            commissionDeduite: false,
+            primeAReverser: primeTTC,
+            dateCreation: new Date().toISOString(),
+            regle: row.regle === 'TRUE' || row.regle === 'true' || row.regle === '1',
+            dateBDX: row.dateBDX ? convertirDateBDX(row.dateBDX) : null,
+            numeroBDX: row.numeroBDX || null,
+            preuveType: null,
+            preuveNumero: null,
+            dateReglement: row.dateReglement ? convertirDateBDX(row.dateReglement) : null,
+            archive: false,
+            commissionRecue: false,
+            dateCommissionRecue: null,
+            montantCommissionRecue: null,
+            referenceCommissionRecue: null,
+            notesCommission: row.notes || ''
+        };
+        
+        return contrat;
+    }
+    
+    /**
+     * Convertir date format JJ/MM/YYYY
+     */
+    function convertirDateBDX(dateStr) {
+        if (!dateStr) return null;
+        
+        const parts = dateStr.split('/');
+        if (parts.length !== 3) return null;
+        
+        const jour = parseInt(parts[0]);
+        const mois = parseInt(parts[1]);
+        const annee = parseInt(parts[2]);
+        
+        if (jour < 1 || jour > 31 || mois < 1 || mois > 12 || annee < 2000) {
+            return null;
+        }
+        
+        const date = new Date(annee, mois - 1, jour);
+        return date.toISOString().split('T')[0];
+    }
+    
+    /**
      * Vérifier authentification au chargement
      */
     window.addEventListener('load', () => {
+        // Initialiser la LED
+        mettreAJourLEDFirebase('offline', 'Initialisation...');
+        
         const utilisateur = localStorage.getItem('utilisateur');
         if (utilisateur && UTILISATEURS_AUTORISE[utilisateur]) {
             utilisateurConnecte = utilisateur;
@@ -4868,6 +6097,300 @@
             document.getElementById('appContainer').style.display = 'none';
         }
     });
+    
+    // v3.0 : CHARGER DEPUIS FIREBASE EN PRIORITÉ AU DÉMARRAGE
+    // v3.0.3 : NOUVEAU FLUX ROBUSTE - Charger Firebase, puis envoyer de force
+    function chargerDepuisFirebaseEnPrioriteFinal() {
+        const cheminPartage = 'pca/bdx_donnees';
+        
+        if (!firebaseDb) {
+            console.log('⚠️ Firebase non disponible, utilisation des données locales');
+            return;
+        }
+        
+        // Lire depuis Firebase
+        firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+            const donneesCloud = snapshot.val();
+            
+            const cloudCount = donneesCloud && donneesCloud.contrats ? donneesCloud.contrats.length : 0;
+            const localCount = contrats.length;
+            
+            console.log(`📊 v3.0.3 : Firebase=${cloudCount} | Local=${localCount}`);
+            
+            // Décision : qu'utiliser ?
+            if (cloudCount > 0) {
+                // Firebase a des données = utiliser Firebase
+                console.log(`✅ v3.0.3 : Utiliser Firebase (${cloudCount} contrats)`);
+                contrats = donneesCloud.contrats;
+                bdxGeneres = donneesCloud.bdxGeneres || [];
+            } else if (localCount > 0) {
+                // Firebase vide mais localStorage a des données
+                console.log(`✅ v3.0.3 : Firebase vide, utiliser localStorage (${localCount} contrats)`);
+                // Garder les contrats locaux
+            } else {
+                console.log(`⚠️ v3.0.3 : Aucune donnée Firebase ni locale`);
+            }
+            
+            // Sauvegarder localement
+            localStorage.setItem('contrats', JSON.stringify(contrats));
+            localStorage.setItem('bdxGeneres', JSON.stringify(bdxGeneres));
+            
+            // Afficher
+            actualiserListeContrats();
+            filtrerContratsBDX();
+            
+            // ÉTAPE CRUCIALE : Envoyer À FIREBASE DE FORCE
+            console.log(`📤 v3.0.3 : Envoi de ${contrats.length} contrats à Firebase...`);
+            
+            setTimeout(() => {
+                sauvegarderDonneesCloud(); // Envoyer vraiment à Firebase
+                
+                // Vérifier après 2 secondes
+                setTimeout(() => {
+                    firebaseDb.ref(cheminPartage).once('value', (check) => {
+                        const verification = check.val();
+                        const verifyCount = verification && verification.contrats ? verification.contrats.length : 0;
+                        
+                        if (verifyCount > 0) {
+                            console.log(`✅✅ v3.0.3 : VÉRIFICATION OK - ${verifyCount} contrats dans Firebase ✅✅`);
+                        } else {
+                            console.error(`❌ v3.0.3 : VÉRIFICATION ÉCHOUÉE - Firebase n'a pas reçu les données !`);
+                            console.error(`❌ Vérifiez les règles Firebase et les permissions`);
+                        }
+                    });
+                }, 2000);
+            }, 500);
+            
+            // Mettre en place l'écoute temps réel
+            synchroniserDonneesCloud();
+            
+        }).catch(err => {
+            console.warn('⚠️ Erreur lecture Firebase:', err.message);
+        });
+    }
+    
+    function chargerDepuisFirebaseEnPriorite() {
+        const cheminPartage = 'pca/bdx_donnees';
+        
+        if (!firebaseDb) {
+            console.log('⚠️ Firebase non disponible');
+            return;
+        }
+        
+        // Lire depuis Firebase
+        firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+            const donneesCloud = snapshot.val();
+            
+            const cloudCount = donneesCloud && donneesCloud.contrats ? donneesCloud.contrats.length : 0;
+            const localCount = contrats.length;
+            
+            console.log(`📊 Firebase : ${cloudCount} contrats | Local : ${localCount} contrats`);
+            
+            if (donneesCloud && donneesCloud.contrats && cloudCount > 0) {
+                // Mémoriser les contrats locaux actuels
+                const contratsLocaux = [...contrats];
+                
+                // FUSIONNER Firebase + Local
+                contrats = fusionnerContrats(donneesCloud.contrats, contratsLocaux);
+                bdxGeneres = donneesCloud.bdxGeneres || [];
+                
+                console.log(`✅ v3.0.1 FUSION : ${cloudCount} cloud + ${contratsLocaux.filter(c => !new Set(donneesCloud.contrats.map(x => x.id)).has(c.id)).length} nouveaux local = ${contrats.length} TOTAL`);
+                
+                // Sauvegarder localement la version fusionnée
+                localStorage.setItem('contrats', JSON.stringify(contrats));
+                localStorage.setItem('bdxGeneres', JSON.stringify(bdxGeneres));
+                
+                // Afficher les données fusionnées
+                actualiserListeContrats();
+                filtrerContratsBDX();
+            }
+            
+            // Écouter les changements en temps réel
+            synchroniserDonneesCloud();
+            
+        }).catch(err => {
+            console.warn('⚠️ Erreur lecture Firebase:', err.message);
+        });
+    }
+    
+    /**
+     * FUSION INTELLIGENTE v2.9.9 (rappel)
+     */
+    function fusionnerContrats(contratsCloud, contratsLocaux) {
+        if (!contratsCloud || contratsCloud.length === 0) {
+            return contratsLocaux;
+        }
+        if (!contratsLocaux || contratsLocaux.length === 0) {
+            return contratsCloud;
+        }
+
+        // Créer un map des IDs cloud
+        const idsCloud = new Set(contratsCloud.map(c => c.id));
+        
+        // Fusionner : tous les cloud + les locaux qui ne sont pas dans le cloud
+        const contractsFusionnes = [...contratsCloud];
+        
+        contratsLocaux.forEach(c => {
+            if (!idsCloud.has(c.id)) {
+                contractsFusionnes.push(c);
+            }
+        });
+
+        console.log(`🔄 FUSION : ${contratsCloud.length} cloud + ${contratsLocaux.filter(c => !idsCloud.has(c.id)).length} locaux = ${contractsFusionnes.length} total`);
+        return contractsFusionnes;
+    }
+    
+    // v2.9.10 : Masquer onglet Saisie pour LECTEUR
+    function initialiserPermissionsV2910() {
+        if (roleUtilisateur === 'LECTEUR') {
+            const btnSaisie = Array.from(document.querySelectorAll('.tab')).find(b => 
+                b.textContent.includes('Saisie')
+            );
+            if (btnSaisie) {
+                btnSaisie.style.display = 'none';
+            }
+            console.log('✅ Permissions initialisées : LECTEUR (Saisie cachée)');
+        } else {
+            console.log(`✅ Permissions initialisées : ${roleUtilisateur}`);
+        }
+    }
+    
+    // v3.0.2 : RESTAURER depuis JSON
+    function restaurerDepuisJSON() {
+        const input = document.createElement('input');
+        input.type = 'file';
+        input.accept = '.json';
+        input.onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                try {
+                    const data = JSON.parse(event.target.result);
+                    
+                    if (data.contrats && Array.isArray(data.contrats)) {
+                        contrats = data.contrats;
+                        localStorage.setItem('contrats', JSON.stringify(contrats));
+                        
+                        console.log(`✅ v3.0.4 : ${contrats.length} contrats restaurés depuis JSON`);
+                        console.log(`📝 Les contrats sont chargés localement.`);
+                        console.log(`⏳ Cliquez maintenant sur "SAUVEGARDER À FIREBASE" pour envoyer à Firebase`);
+                        alert(`✅ ${contrats.length} contrats restaurés depuis JSON\n\n⏳ Cliquez maintenant sur "SAUVEGARDER À FIREBASE" pour envoyer à Firebase`);
+                        
+                        // Afficher les données restaurées
+                        filtrerContratsBDX();
+                        
+                    } else {
+                        alert('❌ Format JSON invalide');
+                    }
+                } catch (err) {
+                    alert(`❌ Erreur lecture JSON: ${err.message}`);
+                }
+            };
+            reader.readAsText(file);
+        };
+        input.click();
+    }
+    
+    // v3.0.4 : SAUVEGARDE MANUELLE ROBUSTE À FIREBASE
+    // v3.0.7 : Sauvegarde immédiate à Firebase (sans boîte de dialogue)
+    function sauvegarderDonneesCloudImmediatement() {
+        if (!firebaseDb || !utilisateurConnecte) {
+            console.warn('⚠️ v3.0.7 : Firebase ou utilisateur non disponible');
+            return;
+        }
+
+        const cheminPartage = 'pca/bdx_donnees';
+        const donnees = {
+            contrats: contrats,
+            bdxGeneres: bdxGeneres || [],
+            derniereMiseAJour: new Date().toISOString(),
+            utilisateur: utilisateurConnecte,
+            dernierModificationPar: utilisateurConnecte.split('@')[0]
+        };
+
+        console.log(`📤 v3.0.7 : Envoi immédiat de ${contrats.length} contrats à Firebase...`);
+
+        firebaseDb.ref(cheminPartage).set(donnees)
+            .then(() => {
+                console.log(`✅ v3.0.7 : Données sauvegardées immédiatement à Firebase`);
+                mettreAJourLEDFirebase('connected', 'Synchronisé');
+            })
+            .catch(err => {
+                console.error(`❌ v3.0.7 : Erreur : ${err.message}`);
+                mettreAJourLEDFirebase('error', 'Erreur de sync');
+            });
+    }
+    
+    function sauvegarderManuelAFirebase() {
+        if (contrats.length === 0) {
+            alert('❌ Aucun contrat à sauvegarder');
+            return;
+        }
+        
+        console.log(`\n🚀 v3.0.4 : DÉBUT SAUVEGARDE MANUELLE`);
+        console.log(`📊 Contrats en mémoire : ${contrats.length}`);
+        
+        if (!firebaseDb) {
+            console.error('❌ Firebase non disponible');
+            alert('❌ Firebase non disponible');
+            return;
+        }
+        
+        const cheminPartage = 'pca/bdx_donnees';
+        const donnees = {
+            contrats: contrats,
+            bdxGeneres: bdxGeneres || [],
+            derniereMiseAJour: new Date().toISOString(),
+            utilisateur: utilisateurConnecte,
+            dernierModificationPar: utilisateurConnecte.split('@')[0]
+        };
+        
+        console.log(`📤 v3.0.4 : Envoi de ${contrats.length} contrats à Firebase...`);
+        console.log(`📍 Chemin Firebase : ${cheminPartage}`);
+        
+        // ÉTAPE 1 : Envoyer
+        firebaseDb.ref(cheminPartage).set(donnees)
+            .then(() => {
+                console.log(`✅ v3.0.4 : ${contrats.length} contrats ENVOYÉS à Firebase`);
+                
+                // ÉTAPE 2 : Attendre 2 secondes puis VÉRIFIER
+                setTimeout(() => {
+                    console.log(`🔍 v3.0.4 : VÉRIFICATION en cours...`);
+                    
+                    firebaseDb.ref(cheminPartage).once('value', (snapshot) => {
+                        const verif = snapshot.val();
+                        const verifCount = verif && verif.contrats ? verif.contrats.length : 0;
+                        
+                        if (verifCount > 0) {
+                            console.log(`✅✅ v3.0.4 : VÉRIFICATION RÉUSSIE - ${verifCount} contrats dans Firebase ✅✅`);
+                            console.log(`✅✅ Les données sont SÛRES dans Firebase ! ✅✅`);
+                            console.log(`✅✅ Vous pouvez maintenant vider le cache SANS RISQUE ! ✅✅`);
+                            
+                            alert(`✅✅ ${verifCount} contrats SAUVEGARDÉS ET VÉRIFIÉS dans Firebase ✅✅\n\nVous pouvez maintenant :\n1. Vider le cache (Ctrl+Shift+Suppr)\n2. Rafraîchir la page\n3. Les contrats se rechargeront depuis Firebase`);
+                        } else {
+                            console.error(`❌ VÉRIFICATION ÉCHOUÉE - Firebase n'a pas reçu les données`);
+                            alert(`❌ Erreur : Firebase n'a pas reçu les données. Vérifiez les règles Firebase.`);
+                        }
+                    }).catch(err => {
+                        console.error(`❌ Erreur vérification : ${err.message}`);
+                    });
+                }, 2000);
+            })
+            .catch(err => {
+                console.error(`❌ ERREUR ENVOI : ${err.message}`);
+                console.error(`❌ Les données NE sont PAS à Firebase !`);
+                console.error(`❌ Vérifiez :`);
+                console.error(`   - Les règles Firebase`);
+                console.error(`   - Le chemin 'pca/bdx_donnees'`);
+                console.error(`   - La connexion Firebase`);
+                alert(`❌ Erreur : ${err.message}\n\nVérifiez les règles Firebase et la connexion`);
+            });
+    }
+    
+    window.restaurerDepuisJSON = restaurerDepuisJSON;
+    window.sauvegarderManuelAFirebase = sauvegarderManuelAFirebase;
     </script>
 
 </body>
