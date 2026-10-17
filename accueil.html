@@ -13,6 +13,8 @@
     --pca-dark:      #2c3e50;
     --pca-white:     #ffffff;
     --pca-purple:    #7d3c98;
+    --pca-green:     #27ae60;
+    --pca-teal:      #0e7c86;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body {
@@ -75,6 +77,8 @@
   }
   .app-card.gna { border-top-color: var(--pca-accent); }
   .app-card.cc { border-top-color: var(--pca-purple); }
+  .app-card.auto { border-top-color: var(--pca-green); }
+  .app-card.mar { border-top-color: var(--pca-teal); }
 
   .app-icon {
     width: 48px;
@@ -89,6 +93,8 @@
   .app-card.bdx .app-icon { color: var(--pca-secondary); }
   .app-card.gna .app-icon { color: var(--pca-accent); }
   .app-card.cc .app-icon { color: var(--pca-purple); }
+  .app-card.auto .app-icon { color: var(--pca-green); }
+  .app-card.mar .app-icon { color: var(--pca-teal); }
 
   .app-card h2 { font-size: 1.2em; color: var(--pca-primary); }
   .app-card p { font-size: 0.9em; color: #5b6b78; line-height: 1.5; }
@@ -101,6 +107,8 @@
   }
   .app-card.gna .app-cta { color: var(--pca-accent); }
   .app-card.cc .app-cta { color: var(--pca-purple); }
+  .app-card.auto .app-cta { color: var(--pca-green); }
+  .app-card.mar .app-cta { color: var(--pca-teal); }
 
   footer {
     text-align: center;
@@ -139,6 +147,20 @@
         <div class="app-icon">💰</div>
         <h2>BDX Compte Courant</h2>
         <p>Bordereaux d'émission, encaissement, reversement et annulation, calcul du compte courant et génération du rapport trimestriel CIMA — Premium Courtage Assur &amp; Elite Assurances.</p>
+        <span class="app-cta">Ouvrir l'application →</span>
+      </a>
+
+      <a class="app-card auto" href="AUTO_SIMPLE_v2_6.html">
+        <div class="app-icon">🚗</div>
+        <h2>Saisie Contrat Auto &amp; Repères</h2>
+        <p>Saisie des contrats automobile, gestion des repères, recherche, suivi des échéances, règlements compagnie et import/export Excel.</p>
+        <span class="app-cta">Ouvrir l'application →</span>
+      </a>
+
+      <a class="app-card mar" href="Saisie_Pointage_Maritime_v7.html">
+        <div class="app-icon">🚢</div>
+        <h2>Production &amp; Pointage Arriérés Certificats Maritimes</h2>
+        <p>Production des certificats maritimes, pointage des arriérés, historique, édition des BDX, contrôles et sauvegardes.</p>
         <span class="app-cta">Ouvrir l'application →</span>
       </a>
 
