@@ -736,9 +736,6 @@
             <input type="email" id="loginEmail" placeholder="📧 Email" onkeypress="if(event.key==='Enter') seConnecter()">
             <input type="password" id="loginPassword" placeholder="🔑 Mot de passe" onkeypress="if(event.key==='Enter') seConnecter()">
             <button onclick="seConnecter()">Se Connecter</button>
-            <p style="margin-top: 20px; font-size: 12px; color: #9ca3af;">
-                Demo : gaston@premium.com / password
-            </p>
         </div>
     </div>
 
@@ -4795,6 +4792,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
          */
         // ✅ v3.0.8 : SYNCHRONISATION TAUX À FIREBASE
         function sauvegarderTauxAFirebase(taux) {
+            if (roleUtilisateur === 'LECTEUR') return;   // lecture seule
             if (!firebaseDb) {
                 console.warn('⚠️ v3.0.8 : Firebase non disponible');
                 return;
@@ -5360,16 +5358,14 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         databaseURL: "https://premium-bdx-app-default-rtdb.europe-west1.firebasedatabase.app",
         projectId: "premium-bdx-app",
         storageBucket: "premium-bdx-app.appspot.com",
-        messagingSenderId: "123456789",
-        appId: "1:123456789:web:abcdef123456"
+        messagingSenderId: "1074430468971",
+        appId: "1:1074430468971:web:849c6ea3638421c8b3222e"
     };
     
-    // Utilisateurs autorisés (DEMO)
-    const UTILISATEURS_AUTORISE = {
-        'gaston@premium.com': 'Gaston2026',
-        'yolande@premium.com': 'Yolande2026',
-        'mariette@premium.com': 'Mariette2026'
-    };
+    // Connexion : comptes Firebase Authentication créés par l'administrateur dans la
+    // console Firebase. Aucun mot de passe n'est stocké dans ce fichier. Les rôles
+    // ci-dessous pilotent l'affichage ; les droits réels (lecture / écriture) sont
+    // appliqués côté serveur par les règles de la Realtime Database.
     
     // Rôles utilisateurs (définit accès application)
     const ROLES_UTILISATEURS = {
@@ -5449,6 +5445,12 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                 return;
             }
             
+            preparerFirebase();
+            if (!firebase.auth().currentUser) {
+                mettreAJourLEDFirebase('offline', 'Non connecté au cloud (données locales)');
+                chargerDonneesLocales();
+                return;
+            }
             if (firebase.apps && firebase.apps.length > 0) {
                 console.log('✅ Firebase déjà initialisé');
                 firebaseDb = firebase.database();
@@ -5473,24 +5475,58 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
     /**
      * Se connecter
      */
-    function seConnecter() {
-        const email = document.getElementById('loginEmail').value.trim();
+    function preparerFirebase() {
+        if (typeof firebase === 'undefined' || !firebase.auth) return false;
+        if (!firebase.apps || firebase.apps.length === 0) firebase.initializeApp(FIREBASE_CONFIG);
+        return true;
+    }
+
+    function messageErreurConnexion(e) {
+        const code = (e && e.code) || '';
+        if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials', 'auth/invalid-email'].includes(code))
+            return '❌ Email ou mot de passe incorrect';
+        if (code === 'auth/too-many-requests') return '❌ Trop de tentatives — réessayez dans quelques minutes';
+        if (code === 'auth/network-request-failed') return '❌ Pas de connexion Internet';
+        if (code === 'auth/user-disabled') return '❌ Ce compte est désactivé';
+        return '❌ Connexion impossible : ' + ((e && e.message) || e);
+    }
+
+    async function seConnecter() {
+        const email = document.getElementById('loginEmail').value.trim().toLowerCase();
         const password = document.getElementById('loginPassword').value;
         const errorDiv = document.getElementById('loginError');
-        
+
         if (!email || !password) {
             errorDiv.textContent = '❌ Email et mot de passe requis';
             errorDiv.style.display = 'block';
             return;
         }
-        
-        if (UTILISATEURS_AUTORISE[email] !== password) {
-            errorDiv.textContent = '❌ Email ou mot de passe incorrect';
+        if (!preparerFirebase()) {
+            errorDiv.textContent = '❌ Serveur de connexion injoignable (pas d\'Internet ?). Rechargez la page une fois en ligne.';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        if (!ROLES_UTILISATEURS[email]) {
+            errorDiv.textContent = '❌ Ce compte n\'a pas accès à BDX Règlement';
+            errorDiv.style.display = 'block';
+            return;
+        }
+        errorDiv.style.display = 'none';
+        try {
+            await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+            await firebase.auth().signInWithEmailAndPassword(email, password);
+        } catch (e) {
+            errorDiv.textContent = messageErreurConnexion(e);
             errorDiv.style.display = 'block';
             document.getElementById('loginPassword').value = '';
             return;
         }
-        
+        ouvrirSession(email);
+    }
+
+    /** Ouvre l'application pour un utilisateur authentifié. */
+    function ouvrirSession(email) {
+        if (utilisateurConnecte === email && document.getElementById('appContainer').style.display === 'block') return;
         // Connexion réussie
         utilisateurConnecte = email;
         roleUtilisateur = ROLES_UTILISATEURS[email] || 'utilisateur';
@@ -5533,7 +5569,11 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         if (confirm('❓ Êtes-vous sûr de vouloir vous déconnecter ?')) {
             localStorage.removeItem('utilisateur');
             localStorage.removeItem('nomUtilisateur');
+            localStorage.removeItem('roleUtilisateur');
             utilisateurConnecte = null;
+            roleUtilisateur = null;
+            try { if (firebaseDb) firebaseDb.ref().off(); } catch (e) {}
+            try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (e) {}
             
             document.getElementById('loginScreen').style.display = 'flex';
             document.getElementById('appContainer').style.display = 'none';
@@ -5602,6 +5642,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
      * Sauvegarder données sur Firebase Cloud
      */
     function sauvegarderDonneesCloud() {
+        if (roleUtilisateur === 'LECTEUR') return;   // lecture seule : jamais d'écriture cloud
         if (!firebaseDb || !utilisateurConnecte) {
             console.warn('❌ v3.0.3 : Firebase ou utilisateur non disponible');
             return;
@@ -6081,20 +6122,21 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
     window.addEventListener('load', () => {
         // Initialiser la LED
         mettreAJourLEDFirebase('offline', 'Initialisation...');
-        
-        const utilisateur = localStorage.getItem('utilisateur');
-        if (utilisateur && UTILISATEURS_AUTORISE[utilisateur]) {
-            utilisateurConnecte = utilisateur;
-            document.getElementById('loginScreen').style.display = 'none';
-            document.getElementById('appContainer').style.display = 'block';
-            document.getElementById('userInfo').style.display = 'flex';
-            document.getElementById('userName').textContent = utilisateur.split('@')[0].toUpperCase();
-            
-            initialiserFirebase();
+        document.getElementById('loginScreen').style.display = 'flex';
+        document.getElementById('appContainer').style.display = 'none';
+
+        if (preparerFirebase()) {
+            // Firebase garde la session d'un rechargement à l'autre
+            firebase.auth().onAuthStateChanged(user => {
+                if (!user) return;
+                const email = (user.email || '').toLowerCase();
+                if (!ROLES_UTILISATEURS[email]) { firebase.auth().signOut(); return; }
+                ouvrirSession(email);
+            });
         } else {
-            localStorage.removeItem('utilisateur');
-            document.getElementById('loginScreen').style.display = 'flex';
-            document.getElementById('appContainer').style.display = 'none';
+            // SDK non chargé (hors ligne) : dernière session rouverte en local uniquement
+            const utilisateur = localStorage.getItem('utilisateur');
+            if (utilisateur && ROLES_UTILISATEURS[utilisateur]) ouvrirSession(utilisateur);
         }
     });
     

@@ -7,6 +7,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script>
 // Vérifie si SheetJS a pu se charger (peut être bloqué par Chrome quand le fichier
 // est ouvert en file:// — notamment après un téléchargement, à cause du Mark of the Web).
@@ -2194,11 +2195,14 @@ const CHEMIN_PARTAGE = 'bdxCompteCourant/partage'; // racine de stockage partag�
 
 // Identifiants des 3 utilisateurs autorisés. Pour changer un mot de passe ou
 // ajouter une personne, modifier directement cette liste puis renvoyer le fichier.
-const UTILISATEURS_AUTORISES = {
-  'gaston': 'Gaston2026',
-  'macoty': 'Macoty2026',
-  'anini':  'Anini2026'
-};
+// Connexion : comptes Firebase Authentication (créés par l'administrateur dans la
+// console Firebase). Aucun mot de passe n'est stocké dans ce fichier : l'accès aux
+// données est contrôlé côté serveur par les règles de la Realtime Database.
+// On se connecte avec son nom (ex. « macoty ») ou son email complet.
+const COMPTES_CC = ['gaston', 'macoty', 'anini'];
+const DOMAINE_COMPTES_CC = '@premium.com';
+const emailDuCompte = nom => nom.includes('@') ? nom : nom + DOMAINE_COMPTES_CC;
+const nomDuCompte = email => String(email || '').toLowerCase().split('@')[0];
 
 let firebaseApp = null;
 let firebaseDb = null;
@@ -2223,14 +2227,26 @@ function initFirebase(){
     document.getElementById('login-statut').textContent = "⚠️ Connexion au serveur partagé indisponible — vérifie ta connexion internet.";
     return;
   }
-  // Reprise automatique de session si déjà connecté précédemment sur ce navigateur
-  const sessionPrec = sessionStorage.getItem('bdx_utilisateur');
-  if(sessionPrec && UTILISATEURS_AUTORISES[sessionPrec]){
-    connecterUtilisateur(sessionPrec);
-  }
+  // Reprise automatique de session (Firebase la garde le temps de l'onglet)
+  firebase.auth().onAuthStateChanged(user => {
+    if(!user) return;
+    const nom = nomDuCompte(user.email);
+    if(!COMPTES_CC.includes(nom) || emailDuCompte(nom) !== String(user.email).toLowerCase()){ firebase.auth().signOut(); return; }
+    if(utilisateurConnecte !== nom) connecterUtilisateur(nom);
+  });
 }
 
-function seConnecter(){
+function messageErreurConnexion(e){
+  const code = (e && e.code) || '';
+  if(['auth/invalid-credential','auth/wrong-password','auth/user-not-found','auth/invalid-login-credentials','auth/invalid-email'].includes(code))
+    return "✗ Nom d'utilisateur ou mot de passe incorrect.";
+  if(code === 'auth/too-many-requests') return "✗ Trop de tentatives — réessaie dans quelques minutes.";
+  if(code === 'auth/network-request-failed') return "✗ Pas de connexion internet.";
+  if(code === 'auth/user-disabled') return "✗ Ce compte est désactivé.";
+  return "✗ Connexion impossible : " + ((e && e.message) || e);
+}
+
+async function seConnecter(){
   const nom = document.getElementById('login-email').value.trim().toLowerCase();
   const pass = document.getElementById('login-password').value;
   const alertEl = document.getElementById('login-alert');
@@ -2245,13 +2261,22 @@ function seConnecter(){
     alertEl.style.display = 'block';
     return;
   }
-  if(UTILISATEURS_AUTORISES[nom] !== pass){
-    alertEl.textContent = "✗ Nom d'utilisateur ou mot de passe incorrect.";
+  const nomCourt = nomDuCompte(nom);
+  if(!COMPTES_CC.includes(nomCourt)){
+    alertEl.textContent = "✗ Ce compte n'a pas accès au BDX Compte Courant.";
     alertEl.style.display = 'block';
     return;
   }
-  sessionStorage.setItem('bdx_utilisateur', nom);
-  connecterUtilisateur(nom);
+  try{
+    await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
+    await firebase.auth().signInWithEmailAndPassword(emailDuCompte(nom), pass);
+  }catch(e){
+    alertEl.textContent = messageErreurConnexion(e);
+    alertEl.style.display = 'block';
+    return;
+  }
+  sessionStorage.setItem('bdx_utilisateur', nomCourt);
+  if(utilisateurConnecte !== nomCourt) connecterUtilisateur(nomCourt);
 }
 
 function connecterUtilisateur(nom){
@@ -2268,6 +2293,7 @@ function seDeconnecter(){
   if(syncRef) syncRef.off();
   sessionStorage.removeItem('bdx_utilisateur');
   utilisateurConnecte = null;
+  try{ firebase.auth().signOut(); }catch(e){}
   document.getElementById('ecran-connexion').style.display = 'flex';
   document.getElementById('app-content').style.display = 'none';
   document.getElementById('login-email').value = '';

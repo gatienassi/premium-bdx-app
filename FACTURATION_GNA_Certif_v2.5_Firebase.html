@@ -10,6 +10,7 @@
     <!-- Firebase SDK -->
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Playfair+Display:wght@700&display=swap');
         
@@ -2403,16 +2404,10 @@
         // (contrairement à BDX où chaque utilisateur a son propre chemin)
         const FIREBASE_PATH_PARTAGE = 'facturationGNA/partage';
 
-        // Utilisateurs autorisés — Gaston (administrateur) peut modifier cette liste.
-        // ⚠️ Ces identifiants sont visibles dans le code source de la page (n'importe
-        // qui peut faire "Afficher le code source" et les lire). C'est un choix
-        // délibéré pour garder la connexion simple ; voir la conversation du
-        // 16/07/2026 pour le compromis sécurité associé.
-        const UTILISATEURS_AUTORISE_GNA = {
-            'gaston@premium.com': 'Gaston2026',
-            'marie@premium.com': 'Marie2026',
-            'laure@premium.com': 'Laure2026'
-        };
+        // Connexion : comptes Firebase Authentication (email + mot de passe), créés par
+        // l'administrateur dans la console Firebase. Aucun mot de passe n'est stocké ici.
+        // La table ci-dessous ne sert qu'à l'affichage du rôle ; l'accès réel aux données
+        // est contrôlé côté serveur par les règles de la Realtime Database.
 
         const ROLES_UTILISATEURS_GNA = {
             'gaston@premium.com': 'admin',
@@ -2431,11 +2426,27 @@
         let firebaseDbGNA = null;
         let syncEnCoursGNA = false; // évite les boucles d'écriture pendant une lecture cloud
 
+        /** Initialise l'application Firebase une seule fois. Renvoie false si le SDK est absent. */
+        function preparerFirebaseGNA() {
+            if (typeof firebase === 'undefined' || !firebase.auth) return false;
+            if (!firebase.apps || firebase.apps.length === 0) firebase.initializeApp(FIREBASE_CONFIG);
+            return true;
+        }
+
+        function messageErreurConnexionGNA(e) {
+            const code = (e && e.code) || '';
+            if (['auth/invalid-credential', 'auth/wrong-password', 'auth/user-not-found', 'auth/invalid-login-credentials', 'auth/invalid-email'].includes(code))
+                return '❌ Email ou mot de passe incorrect';
+            if (code === 'auth/too-many-requests') return '❌ Trop de tentatives — réessayez dans quelques minutes';
+            if (code === 'auth/network-request-failed') return '❌ Pas de connexion Internet';
+            if (code === 'auth/user-disabled') return '❌ Ce compte est désactivé';
+            return '❌ Connexion impossible : ' + ((e && e.message) || e);
+        }
+
         /**
-         * Se connecter (méthode simple : vérification locale, sans Firebase Auth).
-         * Fonctionne aussi bien en file:// qu'en http(s)://.
+         * Se connecter : vérification par Firebase Authentication (côté serveur).
          */
-        function seConnecter() {
+        async function seConnecter() {
             const email = document.getElementById('loginEmail').value.trim().toLowerCase();
             const password = document.getElementById('loginPassword').value;
             const errorDiv = document.getElementById('loginError');
@@ -2445,14 +2456,32 @@
                 errorDiv.style.display = 'block';
                 return;
             }
-
-            if (UTILISATEURS_AUTORISE_GNA[email] !== password) {
-                errorDiv.textContent = '❌ Email ou mot de passe incorrect';
+            if (!preparerFirebaseGNA()) {
+                errorDiv.textContent = '❌ Serveur de connexion injoignable (pas d\'Internet ?). Rechargez la page une fois en ligne.';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            if (!ROLES_UTILISATEURS_GNA[email]) {
+                errorDiv.textContent = '❌ Ce compte n\'a pas accès à la Facturation GNA';
+                errorDiv.style.display = 'block';
+                return;
+            }
+            errorDiv.style.display = 'none';
+            try {
+                await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
+                await firebase.auth().signInWithEmailAndPassword(email, password);
+            } catch (e) {
+                errorDiv.textContent = messageErreurConnexionGNA(e);
                 errorDiv.style.display = 'block';
                 document.getElementById('loginPassword').value = '';
                 return;
             }
+            ouvrirSessionGNA(email);
+        }
 
+        /** Affiche l'application pour un utilisateur authentifié. */
+        function ouvrirSessionGNA(email) {
+            if (utilisateurConnecteGNA === email) return;   // déjà ouverte
             utilisateurConnecteGNA = email;
             roleUtilisateurGNA = ROLES_UTILISATEURS_GNA[email] || 'utilisateur';
             localStorage.setItem('gna_utilisateur', email);
@@ -2470,6 +2499,12 @@
             verifierQuotaLocalStorage();
             appliquerVisibiliteAdminGNA();
             console.log(`✅ Connecté : ${email} - Rôle : ${roleUtilisateurGNA}`);
+        }
+
+        /** Mode dépannage : SDK Firebase non chargé (pas d'Internet). Données locales uniquement. */
+        function ouvrirSessionLocaleGNA(email) {
+            ouvrirSessionGNA(email);
+            afficherAlerteSyncIndisponible();
         }
 
         /**
@@ -2514,6 +2549,8 @@
                 localStorage.removeItem('gna_utilisateur');
                 localStorage.removeItem('gna_role');
                 utilisateurConnecteGNA = null;
+                try { if (firebaseDbGNA) firebaseDbGNA.ref().off(); } catch (e) {}
+                try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (e) {}
 
                 document.getElementById('loginScreen').style.display = 'flex';
                 document.getElementById('appContainer').style.display = 'none';
@@ -2550,8 +2587,11 @@
                     return;
                 }
 
-                if (!firebase.apps || firebase.apps.length === 0) {
-                    firebase.initializeApp(FIREBASE_CONFIG);
+                preparerFirebaseGNA();
+                if (!firebase.auth().currentUser) {
+                    // Pas de session Firebase (mode dépannage hors ligne) : pas d'accès au cloud.
+                    afficherAlerteSyncIndisponible();
+                    return;
                 }
                 firebaseDbGNA = firebase.database();
                 console.log('✅ Firebase initialisé (Facturation GNA - partagé)');
@@ -2616,6 +2656,9 @@
                 } finally {
                     syncEnCoursGNA = false;
                 }
+            }, (erreur) => {
+                console.error('❌ Accès au cloud partagé refusé :', erreur && erreur.message);
+                afficherAlerteSyncIndisponible();
             });
 
             // Synchronisation FINE (par enregistrement) des factures validées, des BDX
@@ -2904,26 +2947,21 @@
         }
 
         /**
-         * Restaurer la session si déjà connecté (évite de re-saisir le mot de passe à chaque rechargement)
+         * Restaurer la session : Firebase garde la connexion d'un rechargement à l'autre.
          */
         window.addEventListener('DOMContentLoaded', function() {
-            const emailSauvegarde = localStorage.getItem('gna_utilisateur');
-            if (emailSauvegarde && UTILISATEURS_AUTORISE_GNA[emailSauvegarde]) {
-                utilisateurConnecteGNA = emailSauvegarde;
-                roleUtilisateurGNA = localStorage.getItem('gna_role') || ROLES_UTILISATEURS_GNA[emailSauvegarde] || 'utilisateur';
-
-                document.getElementById('loginScreen').style.display = 'none';
-                document.getElementById('appContainer').style.display = 'block';
-                document.getElementById('userInfoBar').style.display = 'flex';
-                document.getElementById('userNameDisplay').textContent =
-                    emailSauvegarde.split('@')[0].toUpperCase() + ' (' + roleUtilisateurGNA + ')';
-
-                initialiserFirebaseGNA();
-                verifierRappelBackup();
-                demanderStockagePersistant();
-                verifierQuotaLocalStorage();
-                appliquerVisibiliteAdminGNA();
-                console.log(`✅ Session restaurée : ${emailSauvegarde}`);
+            if (preparerFirebaseGNA()) {
+                firebase.auth().onAuthStateChanged(function(user) {
+                    if (!user) return;
+                    const email = (user.email || '').toLowerCase();
+                    if (!ROLES_UTILISATEURS_GNA[email]) { firebase.auth().signOut(); return; }
+                    ouvrirSessionGNA(email);
+                    console.log(`✅ Session restaurée : ${email}`);
+                });
+            } else {
+                // SDK non chargé (hors ligne) : on rouvre la dernière session en local uniquement.
+                const emailSauvegarde = localStorage.getItem('gna_utilisateur');
+                if (emailSauvegarde && ROLES_UTILISATEURS_GNA[emailSauvegarde]) ouvrirSessionLocaleGNA(emailSauvegarde);
             }
         });
 
