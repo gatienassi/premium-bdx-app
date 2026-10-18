@@ -287,6 +287,10 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   #edModalFields{grid-template-columns:1fr!important;}
 }
 </style>
+<!-- Firebase (connexion + synchronisation multi-postes) -->
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database-compat.js"></script>
 </head>
 <body>
 
@@ -2823,6 +2827,597 @@ function xlsxReady() {
   return false;
 }
 
+/* ════════════════════════════════════════════════════════════════════
+   PCA SYNC — Connexion Firebase + synchronisation multi-postes
+   ────────────────────────────────────────────────────────────────────
+   • La base locale (IndexedDB) reste la référence de travail : l'application
+     fonctionne hors ligne exactement comme avant.
+   • Chaque modification locale est mise dans une file d'attente persistante
+     (IndexedDB « pca_sync_<app> ») puis envoyée à Firebase dès que possible.
+   • Les modifications faites sur l'autre poste arrivent en direct et sont
+     écrites dans la base locale.
+   • Données rangées dans users/<uid>/<app>/<collection>/<id> :
+       { i: id, j: "<enregistrement JSON>", s: horodatage serveur }   (vivant)
+       { i: id, x: 1, s: horodatage serveur }                          (supprimé)
+   • Seul l'utilisateur connecté peut lire / écrire sa branche (règles RTDB).
+   ════════════════════════════════════════════════════════════════════ */
+const PCASync = (() => {
+    'use strict';
+
+    const FIREBASE_CONFIG = {
+        apiKey: "AIzaSyDrZqaNt_nKHZpi6jgaoETEVqz0oRFeIx0",
+        authDomain: "premium-bdx-app.firebaseapp.com",
+        databaseURL: "https://premium-bdx-app-default-rtdb.europe-west1.firebasedatabase.app",
+        projectId: "premium-bdx-app",
+        storageBucket: "premium-bdx-app.firebasestorage.app",
+        messagingSenderId: "1074430468971",
+        appId: "1:1074430468971:web:849c6ea3638421c8b3222e"
+    };
+    const TAILLE_LOT = 400;          // enregistrements par écriture groupée
+    const DELAI_RECEPTION_MS = 400;  // regroupement des modifications reçues
+
+    let A = null;                    // adaptateur fourni par l'application
+    let metaDb = null;
+    let fbApp = null, auth = null, rdb = null;
+    let user = null, connecte = false, sdkAbsent = false;
+    let etat = { init: false, uid: null, lastS: {} };
+    const enAttente = new Map();     // "coll|id" -> j (null = suppression)
+    const echos = new Map();         // envois récents, pour ignorer leur retour
+    let envoiEnCours = false, envoiRelance = false, timerReessai = null;
+    let initEnCours = false, reportee = false;
+    let ecouteurs = [];
+    let fileRecue = new Map(), timerRecue = null, application = false;
+    const sMax = {};
+    let derniereErreur = '';
+    let derniereSynchro = null;
+    let reglesOk = null;             // null = pas encore vérifié
+
+    /* ---------- Méta-données locales (IndexedDB dédiée) ---------- */
+    function ouvrirMeta() {
+        return new Promise((res, rej) => {
+            const r = indexedDB.open('pca_sync_' + A.app, 1);
+            r.onupgradeneeded = () => {
+                const d = r.result;
+                if (!d.objectStoreNames.contains('kv')) d.createObjectStore('kv');
+                if (!d.objectStoreNames.contains('pending')) d.createObjectStore('pending', { keyPath: 'k' });
+            };
+            r.onsuccess = () => res(r.result);
+            r.onerror = () => rej(r.error);
+        });
+    }
+    function tx(store, mode, fn) {
+        return new Promise((res, rej) => {
+            const t = metaDb.transaction(store, mode);
+            let out;
+            const r = fn(t.objectStore(store));
+            if (r) r.onsuccess = () => { out = r.result; };
+            t.oncomplete = () => res(out);
+            t.onerror = () => rej(t.error);
+            t.onabort = () => rej(t.error || new Error('Transaction annulée'));
+        });
+    }
+    const kvGet = k => tx('kv', 'readonly', s => s.get(k));
+    const kvSet = (k, v) => tx('kv', 'readwrite', s => s.put(v, k));
+    const pendingTous = () => tx('pending', 'readonly', s => s.getAll());
+    const pendingVider = () => tx('pending', 'readwrite', s => s.clear());
+    const pendingAjouter = items => tx('pending', 'readwrite', s => { items.forEach(it => s.put(it)); });
+    const pendingRetirer = cles => tx('pending', 'readwrite', s => { cles.forEach(k => s.delete(k)); });
+
+    /* Les clés Firebase interdisent . # $ [ ] / */
+    const encoderCle = id => String(id).replace(/[.#$\[\]\/%]/g, c => '%' + c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0'));
+    const decoderCle = k => String(k).replace(/%([0-9A-F]{2})/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+    const base = () => rdb.ref('users/' + user.uid + '/' + A.app);
+    const TS = () => firebase.database.ServerValue.TIMESTAMP;
+
+    /* ---------- Sécurité : refuser de synchroniser si la base est publique ----------
+       Avec les bonnes règles, lire « users » (la branche de TOUS les comptes) est refusé.
+       Si la lecture passe, les données seraient visibles par n'importe qui : on bloque. */
+    async function verifierRegles() {
+        if (reglesOk) return true;
+        try {
+            await rdb.ref('users').limitToFirst(1).once('value');
+            reglesOk = false;
+        } catch (e) {
+            if (!/permission/i.test((e.code || '') + ' ' + (e.message || ''))) throw e;
+            reglesOk = true;
+        }
+        if (!reglesOk) {
+            derniereErreur = 'Règles Firebase trop ouvertes : vos données seraient lisibles par tous. Synchronisation bloquée tant que les règles fournies ne sont pas appliquées.';
+            majBadge();
+        }
+        return reglesOk;
+    }
+
+    /* ---------- Modifications locales → file d'attente ---------- */
+    function marquer(coll, items) {
+        if (!items || !items.length) return;
+        const lignes = [];
+        items.forEach(([id, rec]) => {
+            if (id === undefined || id === null || id === '') return;
+            const k = coll + '|' + id;
+            const j = (rec === null || rec === undefined) ? null : JSON.stringify(rec);
+            enAttente.set(k, j);
+            lignes.push({ k: k, coll: coll, id: String(id), j: j });
+        });
+        if (!lignes.length) return;
+        majBadge();
+        if (!metaDb) return;
+        pendingAjouter(lignes)
+            .then(() => planifierEnvoi())
+            .catch(e => { derniereErreur = 'File d\'attente locale : ' + e.message; majBadge(); });
+    }
+
+    function planifierEnvoi() {
+        if (envoiEnCours) { envoiRelance = true; return; }
+        envoyer();
+    }
+
+    async function envoyer() {
+        if (!user || !rdb || !etat.init || reglesOk !== true || !enAttente.size) { majBadge(); return; }
+        envoiEnCours = true; majBadge();
+        try {
+            do {
+                envoiRelance = false;
+                const tous = await pendingTous();
+                for (let i = 0; i < tous.length; i += TAILLE_LOT) {
+                    const lot = tous.slice(i, i + TAILLE_LOT);
+                    const maj = {};
+                    lot.forEach(p => {
+                        maj[p.coll + '/' + encoderCle(p.id)] = (p.j === null)
+                            ? { i: p.id, x: 1, s: TS() }
+                            : { i: p.id, j: p.j, s: TS() };
+                        echos.set(p.k, p.j);
+                    });
+                    await base().update(maj);
+                    // Retire de la file ce qui n'a pas été re-modifié pendant l'envoi
+                    const faits = lot.filter(p => enAttente.has(p.k) && enAttente.get(p.k) === p.j).map(p => p.k);
+                    faits.forEach(k => enAttente.delete(k));
+                    await pendingRetirer(faits);
+                    derniereSynchro = new Date();
+                    majBadge();
+                }
+            } while (envoiRelance);
+            derniereErreur = '';
+        } catch (e) {
+            console.error('PCASync — envoi impossible :', e);
+            derniereErreur = traduireErreur(e);
+            clearTimeout(timerReessai);
+            timerReessai = setTimeout(planifierEnvoi, 30000);
+        }
+        envoiEnCours = false;
+        majBadge();
+    }
+
+    /* ---------- Cloud → base locale ---------- */
+    function arreterEcoute() { ecouteurs.forEach(f => f()); ecouteurs = []; }
+
+    function ecouter() {
+        arreterEcoute();
+        A.collections.forEach(coll => {
+            const q = base().child(coll).orderByChild('s').startAt(etat.lastS[coll] || 0);
+            const h = snap => recevoir(coll, snap.key, snap.val());
+            const err = e => { derniereErreur = traduireErreur(e); majBadge(); };
+            q.on('child_added', h, err);
+            q.on('child_changed', h, err);
+            ecouteurs.push(() => { q.off('child_added', h); q.off('child_changed', h); });
+        });
+    }
+
+    function noterS(coll, s) { if (typeof s === 'number' && s > (sMax[coll] || 0)) sMax[coll] = s; }
+
+    async function persisterS() {
+        if (application || fileRecue.size) return;
+        let change = false;
+        Object.keys(sMax).forEach(c => { if (sMax[c] > (etat.lastS[c] || 0)) { etat.lastS[c] = sMax[c]; change = true; } });
+        if (change) { try { await kvSet('etat', etat); } catch (e) { /* ignoré */ } }
+    }
+    let timerS = null;
+    function persisterSBientot() { clearTimeout(timerS); timerS = setTimeout(persisterS, 1500); }
+
+    function recevoir(coll, cle, v) {
+        if (!v || typeof v !== 'object') return;
+        const id = (v.i !== undefined && v.i !== null) ? String(v.i) : decoderCle(cle);
+        const j = v.x ? null : (typeof v.j === 'string' ? v.j : null);
+        const k = coll + '|' + id;
+        derniereSynchro = new Date();
+        if (echos.has(k) && echos.get(k) === j) {      // retour de notre propre envoi
+            echos.delete(k); noterS(coll, v.s); persisterSBientot(); majBadge(); return;
+        }
+        if (enAttente.has(k)) { noterS(coll, v.s); persisterSBientot(); return; }   // la saisie locale l'emporte
+        let m = fileRecue.get(coll);
+        if (!m) { m = new Map(); fileRecue.set(coll, m); }
+        m.set(id, { j: j, s: v.s });
+        clearTimeout(timerRecue);
+        timerRecue = setTimeout(appliquerRecus, DELAI_RECEPTION_MS);
+    }
+
+    async function appliquerRecus() {
+        if (application) { clearTimeout(timerRecue); timerRecue = setTimeout(appliquerRecus, DELAI_RECEPTION_MS); return; }
+        application = true;
+        const lots = fileRecue;
+        fileRecue = new Map();
+        try {
+            for (const [coll, m] of lots) {
+                const changes = [];
+                m.forEach((v, id) => {
+                    noterS(coll, v.s);
+                    if (enAttente.has(coll + '|' + id)) return;
+                    let rec = null;
+                    if (v.j !== null) { try { rec = JSON.parse(v.j); } catch (e) { return; } }
+                    changes.push({ id: id, rec: rec });
+                });
+                if (changes.length) await A.appliquer(coll, changes);
+            }
+        } catch (e) {
+            console.error('PCASync — application des modifications reçues :', e);
+            derniereErreur = 'Écriture locale : ' + e.message;
+        }
+        application = false;
+        await persisterS();
+        majBadge();
+    }
+
+    /* ---------- Première synchronisation d'un poste ---------- */
+    async function premiereSynchro(forcer) {
+        if (initEnCours || !user || etat.init) return;
+        if (reportee && !forcer) return;
+        if (!connecte) { majBadge(); return; }
+        initEnCours = true; reportee = false; majBadge();
+        try {
+            if (!(await verifierRegles())) { initEnCours = false; majBadge(); return; }
+            const distant = (await base().once('value')).val() || {};
+            const vivants = {}, locaux = {}, smax = {};
+            let nbDistant = 0, nbLocal = 0;
+            for (const coll of A.collections) {
+                const obj = distant[coll] || {};
+                const m = new Map();
+                let mx = 0;
+                Object.keys(obj).forEach(cle => {
+                    const v = obj[cle];
+                    if (!v) return;
+                    if (typeof v.s === 'number' && v.s > mx) mx = v.s;
+                    if (v.x || typeof v.j !== 'string') return;
+                    const id = (v.i !== undefined && v.i !== null) ? String(v.i) : decoderCle(cle);
+                    try { m.set(id, JSON.parse(v.j)); } catch (e) { /* ligne illisible ignorée */ }
+                });
+                vivants[coll] = m; smax[coll] = mx; nbDistant += m.size;
+                locaux[coll] = await A.lister(coll); nbLocal += locaux[coll].length;
+            }
+
+            let mode;
+            if (nbDistant === 0) mode = 'envoyer';
+            else if (nbLocal === 0) mode = 'recevoir';
+            else mode = await demanderMode(nbLocal, nbDistant);
+
+            if (mode === 'plus-tard') { reportee = true; initEnCours = false; majBadge(); return; }
+
+            if (mode === 'recevoir' || mode === 'remplacer') {
+                if (mode === 'remplacer' && A.sauvegardeSecours) await A.sauvegardeSecours();
+                await pendingVider(); enAttente.clear();
+                for (const coll of A.collections) await A.remplacerTout(coll, Array.from(vivants[coll].values()));
+            } else if (mode === 'envoyer') {
+                for (const coll of A.collections) marquer(coll, locaux[coll].map(r => [r.id, r]));
+            } else if (mode === 'fusionner') {
+                for (const coll of A.collections) {
+                    const recus = Array.from(vivants[coll].entries()).map(([id, rec]) => ({ id: id, rec: rec }));
+                    if (recus.length) await A.appliquer(coll, recus);
+                    const absents = locaux[coll].filter(r => !vivants[coll].has(String(r.id)));
+                    marquer(coll, absents.map(r => [r.id, r]));
+                }
+            }
+
+            etat = { init: true, uid: user.uid, lastS: smax };
+            await kvSet('etat', etat);
+            if (A.apresInit) await A.apresInit();
+            derniereSynchro = new Date();
+            derniereErreur = '';
+            ecouter();
+            planifierEnvoi();
+        } catch (e) {
+            console.error('PCASync — première synchronisation :', e);
+            derniereErreur = traduireErreur(e);
+        }
+        initEnCours = false;
+        majBadge();
+    }
+
+    /* ---------- Interface ---------- */
+    const CSS = `
+    .pcas-badge{position:fixed;left:14px;bottom:14px;z-index:99990;display:flex;align-items:center;gap:8px;
+      padding:8px 14px;border-radius:999px;font:600 13px/1.2 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+      background:#ffffff;color:#1a3a5c;box-shadow:0 4px 16px rgba(0,0,0,.18);cursor:pointer;border:2px solid #2980b9;max-width:calc(100vw - 28px)}
+    .pcas-badge.ok{border-color:#27ae60}.pcas-badge.wait{border-color:#e67e22}.pcas-badge.off{border-color:#95a5a6}
+    .pcas-badge.err{border-color:#c0392b;color:#c0392b}.pcas-badge.lock{border-color:#7d3c98}
+    .pcas-badge.pcas-inline{position:static;box-shadow:none;padding:5px 12px;font-size:12.5px;white-space:nowrap}
+    .pcas-fond{position:fixed;inset:0;z-index:99995;background:rgba(10,25,45,.55);display:flex;align-items:center;justify-content:center;padding:16px}
+    .pcas-boite{background:#fff;color:#2c3e50;border-radius:14px;max-width:440px;width:100%;padding:24px;
+      font:14px/1.5 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;box-shadow:0 20px 50px rgba(0,0,0,.35)}
+    .pcas-boite h3{margin:0 0 6px;font-size:18px;color:#1a3a5c}
+    .pcas-boite p{margin:0 0 14px;color:#5b6b78}
+    .pcas-boite label{display:block;font-weight:600;font-size:13px;margin:10px 0 4px;color:#1a3a5c}
+    .pcas-boite input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #cfd8e0;border-radius:8px;font-size:14px;color:#2c3e50;background:#fff}
+    .pcas-boite input:focus{outline:2px solid #2980b9;border-color:#2980b9}
+    .pcas-btns{display:flex;flex-direction:column;gap:8px;margin-top:18px}
+    .pcas-btn{padding:10px 14px;border-radius:8px;border:none;font-weight:600;font-size:14px;cursor:pointer;background:#ecf0f1;color:#1a3a5c;text-align:left}
+    .pcas-btn.prim{background:#1a3a5c;color:#fff;text-align:center}.pcas-btn.lien{background:none;color:#2980b9;padding:4px 0;text-align:center}
+    .pcas-btn:disabled{opacity:.6;cursor:wait}
+    .pcas-btn small{display:block;font-weight:400;font-size:12px;opacity:.8;margin-top:2px}
+    .pcas-msg{margin-top:10px;font-size:13px;min-height:18px}.pcas-msg.err{color:#c0392b}.pcas-msg.ok{color:#27ae60}
+    .pcas-ligne{display:flex;justify-content:space-between;gap:12px;padding:6px 0;border-bottom:1px solid #ecf0f1;font-size:13px}
+    .pcas-ligne span:first-child{color:#5b6b78}.pcas-ligne span:last-child{font-weight:600;text-align:right;word-break:break-all}
+    @media print{.pcas-badge,.pcas-fond{display:none!important}}`;
+
+    let badge = null, fondOuvert = null;
+
+    function el(tag, attrs, enfants) {
+        const e = document.createElement(tag);
+        Object.entries(attrs || {}).forEach(([k, v]) => {
+            if (k === 'texte') e.textContent = v;
+            else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+            else e.setAttribute(k, v);
+        });
+        (enfants || []).forEach(c => c && e.appendChild(c));
+        return e;
+    }
+
+    function injecterUI() {
+        const st = document.createElement('style');
+        st.textContent = CSS;
+        document.head.appendChild(st);
+        badge = el('div', { class: 'pcas-badge off', role: 'button', tabindex: '0', title: 'Synchronisation cloud', onclick: ouvrirPanneau });
+        const hote = A.conteneurBadge && document.querySelector(A.conteneurBadge);
+        if (hote) { badge.dataset.inline = '1'; hote.insertBefore(badge, hote.firstChild); }
+        else document.body.appendChild(badge);
+        majBadge();
+    }
+
+    function fermerFond() { if (fondOuvert) { fondOuvert.remove(); fondOuvert = null; } }
+    function ouvrirFond(boite, fermable) {
+        fermerFond();
+        const f = el('div', { class: 'pcas-fond' }, [boite]);
+        if (fermable) f.addEventListener('mousedown', e => { if (e.target === f) fermerFond(); });
+        document.body.appendChild(f);
+        fondOuvert = f;
+        const champ = boite.querySelector('input');
+        if (champ) setTimeout(() => champ.focus(), 50);
+    }
+
+    function nbAttente() { return enAttente.size; }
+
+    function majBadge() {
+        if (!badge) return;
+        const n = nbAttente();
+        let cls = 'off', txt;
+        if (sdkAbsent) { cls = 'err'; txt = '☁️ Synchro indisponible'; }
+        else if (!user) { cls = 'lock'; txt = '🔒 Se connecter pour synchroniser'; }
+        else if (initEnCours) { cls = 'wait'; txt = '⏳ Première synchronisation…'; }
+        else if (derniereErreur) { cls = 'err'; txt = '⚠️ Erreur de synchro' + (n ? ' · ' + n + ' en attente' : ''); }
+        else if (!etat.init) { cls = 'wait'; txt = '⏸ Synchronisation à lancer'; }
+        else if (!connecte) { cls = 'off'; txt = '📴 Hors ligne' + (n ? ' · ' + n + ' en attente' : ''); }
+        else if (n || envoiEnCours || application) { cls = 'wait'; txt = '⏳ Synchronisation' + (n ? ' · ' + n + ' en attente' : '…'); }
+        else { cls = 'ok'; txt = '☁️ Synchronisé'; }
+        badge.className = 'pcas-badge ' + cls + (badge.dataset.inline ? ' pcas-inline' : '');
+        badge.textContent = txt;
+        if (fondOuvert && fondOuvert.dataset.panneau) remplirPanneau(fondOuvert.querySelector('.pcas-boite'));
+    }
+
+    function traduireErreur(e) {
+        const code = (e && (e.code || '')) + '';
+        const msg = (e && e.message) || String(e);
+        if (/PERMISSION_DENIED|permission/i.test(code + msg)) return 'Accès refusé par Firebase (règles de la base à configurer)';
+        if (code === 'auth/invalid-credential' || code === 'auth/wrong-password' || code === 'auth/user-not-found' || code === 'auth/invalid-login-credentials')
+            return 'Email ou mot de passe incorrect';
+        if (code === 'auth/invalid-email') return 'Adresse email invalide';
+        if (code === 'auth/too-many-requests') return 'Trop de tentatives — réessayez dans quelques minutes';
+        if (code === 'auth/network-request-failed') return 'Pas de connexion Internet';
+        if (code === 'auth/user-disabled') return 'Ce compte est désactivé';
+        if (code === 'auth/operation-not-allowed') return 'Connexion email/mot de passe non activée dans Firebase';
+        return msg;
+    }
+
+    function ouvrirConnexion() {
+        const email = el('input', { type: 'email', autocomplete: 'username', placeholder: 'vous@exemple.com' });
+        const mdp = el('input', { type: 'password', autocomplete: 'current-password' });
+        const msg = el('div', { class: 'pcas-msg' });
+        const go = el('button', { class: 'pcas-btn prim', type: 'submit', texte: 'Se connecter' });
+        const form = el('form', {}, [
+            el('h3', { texte: '🔒 Connexion — synchronisation' }),
+            el('p', { texte: 'Connectez-vous pour retrouver vos données sur tous vos postes. Sans connexion, l\'application fonctionne uniquement sur ce poste.' }),
+            el('label', { texte: 'Email' }), email,
+            el('label', { texte: 'Mot de passe' }), mdp,
+            msg,
+            el('div', { class: 'pcas-btns' }, [
+                go,
+                el('button', { class: 'pcas-btn lien', type: 'button', texte: 'Mot de passe oublié ?', onclick: async () => {
+                    if (!email.value.trim()) { msg.className = 'pcas-msg err'; msg.textContent = 'Saisissez d\'abord votre email.'; return; }
+                    try { await auth.sendPasswordResetEmail(email.value.trim()); msg.className = 'pcas-msg ok'; msg.textContent = 'Email de réinitialisation envoyé.'; }
+                    catch (e) { msg.className = 'pcas-msg err'; msg.textContent = traduireErreur(e); }
+                } }),
+                el('button', { class: 'pcas-btn lien', type: 'button', texte: 'Continuer sans synchroniser', onclick: fermerFond })
+            ])
+        ]);
+        form.addEventListener('submit', async e => {
+            e.preventDefault();
+            go.disabled = true; msg.className = 'pcas-msg'; msg.textContent = 'Connexion…';
+            try { await auth.signInWithEmailAndPassword(email.value.trim(), mdp.value); fermerFond(); }
+            catch (err) { msg.className = 'pcas-msg err'; msg.textContent = traduireErreur(err); go.disabled = false; }
+        });
+        ouvrirFond(el('div', { class: 'pcas-boite' }, [form]), true);
+    }
+
+    function remplirPanneau(boite) {
+        boite.textContent = '';
+        const lignes = [
+            ['Compte', user ? user.email : '—'],
+            ['Réseau', connecte ? 'En ligne' : 'Hors ligne'],
+            ['En attente d\'envoi', String(nbAttente())],
+            ['Dernière activité', derniereSynchro ? derniereSynchro.toLocaleString('fr-FR') : '—']
+        ];
+        if (derniereErreur) lignes.push(['Erreur', derniereErreur]);
+        const btns = [];
+        if (!etat.init) btns.push(el('button', { class: 'pcas-btn prim', texte: 'Lancer la première synchronisation', onclick: () => { fermerFond(); premiereSynchro(true); } }));
+        else btns.push(el('button', { class: 'pcas-btn prim', texte: 'Synchroniser maintenant', onclick: () => { derniereErreur = ''; reglesOk = null; fermerFond(); demarrerSynchro(); } }));
+        btns.push(el('button', { class: 'pcas-btn', texte: 'Se déconnecter', onclick: async () => {
+            if (nbAttente() && !confirm(nbAttente() + ' modification(s) pas encore envoyée(s). Elles restent sur ce poste et partiront à la prochaine connexion.\n\nSe déconnecter ?')) return;
+            fermerFond(); await auth.signOut();
+        } }));
+        btns.push(el('button', { class: 'pcas-btn lien', texte: 'Fermer', onclick: fermerFond }));
+        boite.appendChild(el('h3', { texte: '☁️ Synchronisation' }));
+        lignes.forEach(([a, b]) => boite.appendChild(el('div', { class: 'pcas-ligne' }, [el('span', { texte: a }), el('span', { texte: b })])));
+        boite.appendChild(el('div', { class: 'pcas-btns' }, btns));
+    }
+
+    function ouvrirPanneau() {
+        if (sdkAbsent) { alert('La bibliothèque Firebase n\'a pas pu être chargée (pas d\'Internet à l\'ouverture).\nVos saisies sont gardées sur ce poste ; rechargez la page une fois en ligne pour synchroniser.'); return; }
+        if (!auth) return;
+        if (!user) { ouvrirConnexion(); return; }
+        const boite = el('div', { class: 'pcas-boite' });
+        ouvrirFond(boite, true);
+        fondOuvert.dataset.panneau = '1';
+        remplirPanneau(boite);
+    }
+
+    function demanderMode(nbLocal, nbDistant) {
+        return new Promise(resolve => {
+            const choisir = m => { fermerFond(); resolve(m); };
+            const fmt = n => n.toLocaleString('fr-FR');
+            const boite = el('div', { class: 'pcas-boite' }, [
+                el('h3', { texte: '☁️ Première synchronisation de ce poste' }),
+                el('p', { texte: 'Ce poste contient ' + fmt(nbLocal) + ' enregistrement(s) et le cloud en contient ' + fmt(nbDistant) + '. Que faire ?' }),
+                el('div', { class: 'pcas-btns' }, [
+                    el('button', { class: 'pcas-btn', onclick: () => choisir('remplacer') }, [
+                        document.createTextNode('☁️ Prendre les données du cloud'),
+                        el('small', { texte: 'Recommandé si le cloud est à jour. Les données de ce poste sont remplacées (une sauvegarde est faite avant).' })]),
+                    el('button', { class: 'pcas-btn', onclick: () => choisir('fusionner') }, [
+                        document.createTextNode('🔀 Fusionner les deux'),
+                        el('small', { texte: 'Garde tout. Risque de doublons si les mêmes données ont été saisies séparément sur chaque poste.' })]),
+                    el('button', { class: 'pcas-btn lien', texte: 'Plus tard', onclick: () => choisir('plus-tard') })
+                ])
+            ]);
+            ouvrirFond(boite, false);
+        });
+    }
+
+    function demarrerSynchro() {
+        verifierRegles()
+            .then(ok => { if (ok && user) { ecouter(); planifierEnvoi(); } })
+            .catch(e => { derniereErreur = traduireErreur(e); majBadge(); });
+    }
+
+    /* ---------- Démarrage ---------- */
+    async function demarrer(adaptateur) {
+        A = adaptateur;
+        injecterUI();
+        try {
+            metaDb = await ouvrirMeta();
+            etat = (await kvGet('etat')) || etat;
+            if (!etat.lastS) etat.lastS = {};
+            (await pendingTous()).forEach(p => enAttente.set(p.k, p.j));
+            if (A.preparer) await A.preparer();
+        } catch (e) {
+            derniereErreur = 'Stockage local de synchronisation indisponible : ' + e.message;
+            majBadge();
+            return;
+        }
+        if (typeof firebase === 'undefined' || !firebase.database || !firebase.auth) { sdkAbsent = true; majBadge(); return; }
+        fbApp = firebase.apps.find(a => a.name === 'pcaSync') || firebase.initializeApp(FIREBASE_CONFIG, 'pcaSync');
+        auth = fbApp.auth();
+        rdb = fbApp.database();
+        rdb.ref('.info/connected').on('value', s => {
+            connecte = s.val() === true;
+            if (connecte && derniereErreur === 'Pas de connexion Internet') derniereErreur = '';
+            majBadge();
+            if (connecte && user) { if (!etat.init) premiereSynchro(false); else if (reglesOk) planifierEnvoi(); }
+        });
+        let premierEtat = true;
+        auth.onAuthStateChanged(u => {
+            user = u;
+            arreterEcoute();
+            if (!u) {
+                majBadge();
+                if (premierEtat) ouvrirConnexion();
+                premierEtat = false;
+                return;
+            }
+            premierEtat = false;
+            if (etat.uid && etat.uid !== u.uid) etat = { init: false, uid: u.uid, lastS: {} };
+            majBadge();
+            if (etat.init) demarrerSynchro();
+            else if (connecte) premiereSynchro(false);
+        });
+    }
+
+    return {
+        demarrer: demarrer,
+        marquer: marquer,
+        estInitialise: () => !!etat.init,
+        kvGet: k => metaDb ? kvGet('a:' + k) : Promise.resolve(undefined),
+        kvSet: (k, v) => metaDb ? kvSet('a:' + k, v) : Promise.resolve()
+    };
+})();
+
+
+// ═══════════════════════════════════════════════════════════════════════
+//  SYNCHRONISATION CLOUD (Firebase) — adaptateur Maritime
+//  Les écritures IndexedDB passent toutes par dbPutAll / dbDeleteIds /
+//  dbClearStore : on les enveloppe pour mettre chaque ligne modifiée
+//  dans la file d'envoi. Les lignes reçues du cloud sont écrites avec les
+//  fonctions d'origine (sans renvoi vers le cloud).
+// ═══════════════════════════════════════════════════════════════════════
+const _dbPutAllLocal     = dbPutAll;
+const _dbDeleteIdsLocal  = dbDeleteIds;
+const _dbClearStoreLocal = dbClearStore;
+
+dbPutAll = async function (storeName, rows) {
+  await _dbPutAllLocal(storeName, rows);
+  if (rows && rows.length) PCASync.marquer(storeName, rows.map(r => [r.id, r]));
+};
+dbDeleteIds = async function (storeName, ids) {
+  await _dbDeleteIdsLocal(storeName, ids);
+  if (ids && ids.length) PCASync.marquer(storeName, ids.filter(id => id !== undefined && id !== null).map(id => [id, null]));
+};
+dbClearStore = async function (storeName) {
+  const ids = (await dbGetAll(storeName)).map(r => r.id);
+  await _dbClearStoreLocal(storeName);
+  if (ids.length) PCASync.marquer(storeName, ids.map(id => [id, null]));
+};
+
+let syncTimerRecharge = null;
+const syncARecharger = new Set();
+function syncRechargerBientot(coll) {
+  syncARecharger.add(coll);
+  clearTimeout(syncTimerRecharge);
+  syncTimerRecharge = setTimeout(async () => {
+    const colls = new Set(syncARecharger); syncARecharger.clear();
+    if (colls.has(STORE_BDX)) await loadFromDB();
+    if (colls.has(STORE_HIST)) {
+      try { await renderHistorique(); } catch (e) { /* onglet non affiché */ }
+      updateGuideStats();
+    }
+  }, 300);
+}
+
+const syncAdaptateurMaritime = {
+  app: 'maritime',
+  collections: [STORE_BDX, STORE_HIST],
+  conteneurBadge: '.db-bar-actions',
+  lister: coll => dbGetAll(coll),
+  appliquer: async (coll, changes) => {
+    const puts = changes.filter(c => c.rec).map(c => Object.assign({}, c.rec, { id: c.id }));
+    const dels = changes.filter(c => !c.rec).map(c => c.id);
+    if (puts.length) await _dbPutAllLocal(coll, puts);
+    if (dels.length) await _dbDeleteIdsLocal(coll, dels);
+    syncRechargerBientot(coll);
+  },
+  remplacerTout: async (coll, recs) => {
+    await _dbClearStoreLocal(coll);
+    if (recs.length) await _dbPutAllLocal(coll, recs.map(r => Object.assign({}, r)));
+    syncRechargerBientot(coll);
+  },
+  sauvegardeSecours: async () => { await exporterBase(); }
+};
+
+
 // ═══════════════════════════════════════════════════════════════════════
 //  DÉMARRAGE
 // ═══════════════════════════════════════════════════════════════════════
@@ -2831,6 +3426,7 @@ function xlsxReady() {
   try {
     await initDB();
     await loadFromDB();
+    PCASync.demarrer(syncAdaptateurMaritime);
     // Demande au navigateur de ne pas évincer la base lors des nettoyages automatiques.
     if (navigator.storage && navigator.storage.persist) {
       navigator.storage.persist().then(ok => {
