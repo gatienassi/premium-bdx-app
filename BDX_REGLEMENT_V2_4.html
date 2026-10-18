@@ -5574,7 +5574,8 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             localStorage.removeItem('roleUtilisateur');
             utilisateurConnecte = null;
             roleUtilisateur = null;
-            try { if (firebaseDb) firebaseDb.ref().off(); } catch (e) {}
+            try { if (firebaseDb) firebaseDb.ref('pca/bdx_donnees').off(); } catch (e) {}
+            arreterSynchronisationCloud();
             try { if (typeof firebase !== 'undefined' && firebase.auth) firebase.auth().signOut(); } catch (e) {}
             
             document.getElementById('loginScreen').style.display = 'flex';
@@ -5592,8 +5593,26 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
     /**
      * Synchroniser données avec Firebase Cloud
      */
+    // Économie de bande passante Firebase :
+    //  • une seule écoute et un seul minuteur, même si cette fonction est appelée plusieurs fois ;
+    //  • on n'envoie au cloud que si contrats / BDX ont réellement changé depuis le dernier
+    //    échange (envoi ou réception). Avant, toute la base partait toutes les 30 s.
+    let ecouteCloudActive = false;
+    let minuteurEnvoiCloud = null;
+    let signatureCloud = null;          // empreinte des données telles que connues du cloud
+    const signatureDonnees = (c, b) => JSON.stringify([c || [], b || []]);
+
+    function arreterSynchronisationCloud() {
+        if (minuteurEnvoiCloud) clearInterval(minuteurEnvoiCloud);
+        minuteurEnvoiCloud = null;
+        ecouteCloudActive = false;
+        signatureCloud = null;
+    }
+
     function synchroniserDonneesCloud() {
         if (!firebaseDb) return;
+        if (ecouteCloudActive) return;   // déjà en place
+        ecouteCloudActive = true;
         
         // ✅ CHEMIN PARTAGÉ pour tous les utilisateurs (Gaston, Mariette, Yolande)
         const cheminPartage = 'pca/bdx_donnees';
@@ -5606,14 +5625,15 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             if (donnees) {
                 contrats = donnees.contrats || [];
                 bdxGeneres = donnees.bdxGeneres || [];
+                signatureCloud = signatureDonnees(contrats, bdxGeneres);
                 console.log(`✅ ${contrats.length} contrats synchronisés depuis cloud`);
                 filtrerContratsBDX();
                 mettreAJourLEDFirebase('connected', 'Synchronisé');
             }
         });
         
-        // Sauvegarder données locales → Cloud toutes les 30s
-        setInterval(() => {
+        // Vérifier toutes les 30 s s'il y a des modifications locales à envoyer
+        minuteurEnvoiCloud = setInterval(() => {
             sauvegarderDonneesCloud();
         }, 30000);
     }
@@ -5630,8 +5650,8 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
         alert('🔄 Synchronisation en cours...');
         console.log('🔄 FORCE SYNC : Envoi des données à Firebase...');
         
-        // Forcer l'écriture
-        sauvegarderDonneesCloud();
+        // Forcer l'écriture (même sans modification détectée)
+        sauvegarderDonneesCloud(true);
         
         // Attendre 2 secondes puis actualiser depuis Firebase
         setTimeout(() => {
@@ -5643,12 +5663,14 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
     /**
      * Sauvegarder données sur Firebase Cloud
      */
-    function sauvegarderDonneesCloud() {
+    function sauvegarderDonneesCloud(forcer) {
         if (roleUtilisateur === 'LECTEUR') return;   // lecture seule : jamais d'écriture cloud
         if (!firebaseDb || !utilisateurConnecte) {
             console.warn('❌ v3.0.3 : Firebase ou utilisateur non disponible');
             return;
         }
+        const signature = signatureDonnees(contrats, bdxGeneres);
+        if (!forcer && signature === signatureCloud) return;   // rien de nouveau : pas d'envoi
         
         try {
             const donnees = {
@@ -5671,6 +5693,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
             
             firebaseDb.ref(cheminPartage).set(donnees)
                 .then(() => {
+                    signatureCloud = signature;
                     console.log(`✅✅ v3.0.3 : ${contrats.length} contrats SAUVEGARDÉS à Firebase ✅✅`);
                     console.log(`✅✅ Les données sont SÛRES - vous pouvez vider le cache ! ✅✅`);
                     mettreAJourLEDFirebase('connected', 'Synchronisé');
@@ -6167,6 +6190,7 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
                 console.log(`✅ v3.0.3 : Utiliser Firebase (${cloudCount} contrats)`);
                 contrats = donneesCloud.contrats;
                 bdxGeneres = donneesCloud.bdxGeneres || [];
+                signatureCloud = signatureDonnees(contrats, bdxGeneres);
             } else if (localCount > 0) {
                 // Firebase vide mais localStorage a des données
                 console.log(`✅ v3.0.3 : Firebase vide, utiliser localStorage (${localCount} contrats)`);
