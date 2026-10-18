@@ -2199,7 +2199,9 @@ const CHEMIN_PARTAGE = 'bdxCompteCourant/partage'; // racine de stockage partag�
 // console Firebase). Aucun mot de passe n'est stocké dans ce fichier : l'accès aux
 // données est contrôlé côté serveur par les règles de la Realtime Database.
 // On se connecte avec son nom (ex. « macoty ») ou son email complet.
-const COMPTES_CC = ['gaston', 'macoty', 'anini'];
+// Pour ajouter quelqu'un : créer son compte (nom@premium.com) dans la console Firebase,
+// l'ajouter ici ET dans les règles de la Realtime Database (branche bdxCompteCourant).
+const COMPTES_CC = ['gaston'];
 const DOMAINE_COMPTES_CC = '@premium.com';
 const emailDuCompte = nom => nom.includes('@') ? nom : nom + DOMAINE_COMPTES_CC;
 const nomDuCompte = email => String(email || '').toLowerCase().split('@')[0];

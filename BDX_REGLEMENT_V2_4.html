@@ -5370,8 +5370,10 @@ Les contrats archivés seront marqués comme traités (BDX généré) et dispara
     // Rôles utilisateurs (définit accès application)
     const ROLES_UTILISATEURS = {
         'gaston@premium.com': 'ADMINISTRATEUR',    // v2.9.10 : Admin - gère tout
-        'mariette@premium.com': 'ÉDITEUR',         // v2.9.10 : Éditeur - saisit et modifie
-        'yolande@premium.com': 'LECTEUR'           // v2.9.10 : Lecteur - consulte seulement
+        'mariette@premium.com': 'ÉDITEUR'          // v2.9.10 : Éditeur - saisit et modifie
+        // Pour ajouter quelqu'un (rôles possibles : ADMINISTRATEUR, ÉDITEUR, LECTEUR) :
+        // créer son compte dans la console Firebase, l'ajouter ici ET dans les règles
+        // de la Realtime Database (branche pca).
     };
     
     // v2.9.10 : Fonction pour vérifier les permissions
