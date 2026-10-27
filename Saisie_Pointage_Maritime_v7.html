@@ -316,7 +316,7 @@ body::before{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
     <p>Premium Courtage Assur — Gestion des certificats &amp; BDX compagnies</p>
   </div>
   <div class="header-right">
-    <span class="version-badge">v7.0 — Sept. 2026</span>
+    <span class="version-badge">v7.1 — Oct. 2026</span>
     <div class="header-logo">⚓</div>
   </div>
 </div>
@@ -807,7 +807,7 @@ const DB_VERSION  = 2;
 const STORE_BDX   = 'bdx';
 const STORE_HIST  = 'historique';
 const LS_LAST_EXP = 'pca_last_export';
-const APP_VERSION = '7.0';
+const APP_VERSION = '7.1';
 const RAPPEL_JOURS= 7;      // rappel d'export au-delà de N jours
 const LOG_MAX     = 400;    // nombre max de lignes conservées dans le journal
 
@@ -867,6 +867,27 @@ function normCert(v) {
     if (Number.isFinite(n)) return n.toFixed(0);
   }
   return s.toUpperCase();
+}
+
+/**
+ * Valeur d'un identifiant lu dans Excel (N° certificat, police, BDX, chèque).
+ * CORRECTION v7.1 : on utilisait le texte « affiché » calculé par la bibliothèque Excel.
+ * Pour une cellule numérique au format Standard, ce texte est abrégé en notation
+ * scientifique : 47612026022121 devenait « 4.7612E+13 », enregistré 47612000000000.
+ * Le N° réel était perdu, la recherche échouait, et des certificats différents d'un
+ * même BDX finissaient confondus (le second était ignoré comme « déjà en base »).
+ * On part désormais de la valeur brute de la cellule.
+ */
+function valeurIdentifiant(raw, txt) {
+  const t = (txt === null || txt === undefined) ? '' : String(txt).trim();
+  if (typeof raw === 'number' && Number.isFinite(raw)) {
+    if (/^\d+$/.test(t) && Number(t) === raw) return t;            // affichage complet (garde les zéros de tête)
+    if (Number.isInteger(raw)) return Number.isSafeInteger(raw) ? String(raw) : BigInt(raw).toString();
+    return t || String(raw);
+  }
+  if (raw instanceof Date) return t;
+  if (raw !== '' && raw !== null && raw !== undefined) return String(raw).trim();
+  return t;
 }
 
 function normStr(s) {
@@ -1159,6 +1180,30 @@ function showTab(id) {
 // ═══════════════════════════════════════════════════════════════════════
 //  RENDU GLOBAL
 // ═══════════════════════════════════════════════════════════════════════
+/**
+ * Signale les N° de certificat probablement tronqués par l'ancienne lecture Excel
+ * (≥ 12 chiffres finissant par au moins 6 zéros) et les fichiers à réimporter.
+ */
+function verifierCertificatsTronques() {
+  const suspects = allRows().filter(r => /^\d{6,}0{6,}$/.test(String(r.certificat || '')));
+  const ancien = document.getElementById('alerteCertTronques');
+  if (ancien) ancien.remove();
+  if (!suspects.length) return;
+  const fichiers = {};
+  suspects.forEach(r => { const k = `${r._compagnie} — ${r.sourceFile || 'fichier inconnu'}`; fichiers[k] = (fichiers[k] || 0) + 1; });
+  const div = document.createElement('div');
+  div.id = 'alerteCertTronques';
+  div.style.cssText = 'margin:0 0 18px;padding:12px 16px;border-radius:10px;border:1px solid #e67e22;background:rgba(230,126,34,.12);color:inherit;font-size:.9em;line-height:1.5';
+  const titre = document.createElement('strong');
+  titre.textContent = `⚠️ ${suspects.length.toLocaleString('fr-FR')} N° de certificat probablement tronqués (lecture Excel des versions précédentes).`;
+  const p = document.createElement('div');
+  p.textContent = 'Réimportez ces BDX (même compagnie) dans l\'onglet BDX : les N° seront réparés et les certificats manquants ajoutés. Fichiers concernés : ' +
+    Object.entries(fichiers).map(([f, n]) => `${f} (${n})`).join(' · ');
+  div.appendChild(titre); div.appendChild(p);
+  const barre = document.querySelector('.db-bar');
+  if (barre && barre.parentNode) barre.parentNode.insertBefore(div, barre.nextSibling);
+}
+
 function renderAll() {
   renderBdxList();
   updateFilterCompagnie();
@@ -1166,6 +1211,7 @@ function renderAll() {
   updateGuideStats();
   checkBackupReminder();
   setDbStatus('ok', 'Base connectée — IndexedDB', buildDbStats());
+  verifierCertificatsTronques();
 }
 
 function updateGuideStats() {
@@ -1339,8 +1385,16 @@ function parseBdxWorkbook(wb) {
     for (const c of cands) if (row[c] !== undefined && row[c] !== '') return row[c];
     return '';
   };
-  /** Valeur affichée par Excel — pour les identifiants (certificat, chèque, police, BDX). */
+  /** Identifiants (certificat, chèque, police, BDX) : valeur exacte de la cellule. */
   const ft = (row, cands) => {
+    for (const c of cands) {
+      const v = valeurIdentifiant(row[c], row['_TXT_' + c]);
+      if (v !== '') return v;
+    }
+    return '';
+  };
+  /** Ancienne lecture (v7.0, texte affiché) — sert uniquement à retrouver les N° tronqués déjà en base. */
+  const ftAncien = (row, cands) => {
     for (const c of cands) {
       const t = row['_TXT_' + c];
       if (t !== undefined && t !== '') return t;
@@ -1354,6 +1408,8 @@ function parseBdxWorkbook(wb) {
     dateBdx:         fc(row, ['DATE_BDX', 'DATEBDX', 'DATE_DU_BDX']),
     dateCertificat:  fc(row, ['DATE_CERTIFICAT', 'DATE_EMISSION', 'DATE_CERT', 'DATE_D_EMISSION']),
     certificat:      normCert(ft(row, ['N_CERTIFICAT', 'CERTIFICAT', 'NO_CERTIFICAT', 'NUM_CERTIFICAT', 'N_CERT'])),
+    _certAncien:     normCert(ftAncien(row, ['N_CERTIFICAT', 'CERTIFICAT', 'NO_CERTIFICAT', 'NUM_CERTIFICAT', 'N_CERT'])),
+    _bdxAncien:      String(ftAncien(row, ['N_BDX', 'N__BDX', 'BDX', 'NUM_BDX', 'NO_BDX']) || '').trim(),
     cheque:          String(ft(row, ['N_CHEQUE', 'NO_CHEQUE', 'CHEQUE', 'NCHEQUE', 'N_DU_CHEQUE']) || '').trim(),
     police:          String(ft(row, ['N_POLICE', 'POLICE', 'NO_POLICE', 'NUM_POLICE']) || '').trim(),
     assure:          String(fc(row, ['ASSURE', 'NOM_ASSURE', 'CLIENT', 'NOM_DU_CLIENT']) || '')
@@ -1453,14 +1509,40 @@ async function importerBdx() {
   const cle      = r => `${normCert(r.certificat)}|${normStr(r.bdx)}`;
   const existing = new Set(bdxStore[comp].map(cle));
 
-  let totalAdded = 0;
+  let totalAdded = 0, totalRepares = 0;
   const ignores  = [];
   const toSave   = [];
 
+  // Réparation (v7.1) : lignes importées avant la correction avec un N° tronqué.
+  // Clé : N° tronqué | BDX | assuré | prime TTC  →  liste des lignes en base.
+  const cleAncienne = (cert, bdx, assure, ttc) => `${cert}|${normStr(bdx)}|${normStr(assure)}|${Math.round(numVal(ttc))}`;
+  const aReparer = new Map();
+  bdxStore[comp].forEach(r => {
+    const k = cleAncienne(normCert(r.certificat), r.bdx, r.assure, r.primeTtc);
+    (aReparer.get(k) || aReparer.set(k, []).get(k)).push(r);
+  });
+
   pendingBdxData.forEach(({ fileName, rows }) => {
-    let added = 0, skipped = 0;
-    rows.forEach(row => {
+    let added = 0, skipped = 0, repares = 0;
+    rows.forEach(rowLu => {
+      const { _certAncien, _bdxAncien, ...row } = rowLu;
       const k = cle(row);
+      if (!existing.has(k) && _certAncien && _certAncien !== row.certificat) {
+        const candidats = aReparer.get(cleAncienne(_certAncien, _bdxAncien, row.assure, row.primeTtc)) || [];
+        const cible = candidats.shift();
+        if (cible) {
+          existing.delete(cle(cible));
+          cible.certificat = row.certificat;
+          cible.bdx = row.bdx;
+          if (row.police) cible.police = row.police;
+          if (row.cheque) cible.cheque = row.cheque;
+          cible.reparationCert = Date.now();
+          existing.add(k);
+          toSave.push(cible);
+          repares++;
+          return;
+        }
+      }
       if (existing.has(k)) {
         skipped++;
         if (ignores.length < 500) ignores.push({ fichier: fileName, certificat: row.certificat, bdx: row.bdx, assure: row.assure });
@@ -1472,15 +1554,16 @@ async function importerBdx() {
       toSave.push(rec);
       added++;
     });
-    totalAdded += added;
-    addLog('info', `📁 ${fileName} → ${added} ajoutés${skipped ? `, ${skipped} déjà en base` : ''} [${comp}]`);
+    totalAdded += added; totalRepares += repares;
+    addLog('info', `📁 ${fileName} → ${added} ajoutés${repares ? `, ${repares} N° de certificat réparés` : ''}${skipped ? `, ${skipped} déjà en base` : ''} [${comp}]`);
   });
 
   try {
     await dbPutAll(STORE_BDX, toSave);
     renderAll();
-    toast(`✅ ${totalAdded.toLocaleString('fr-FR')} certificat(s) ajouté(s) pour ${comp}${ignores.length ? ` · ${ignores.length} déjà présent(s)` : ''}.`,
-          totalAdded > 0 ? 'success' : 'warn', 6000);
+    toast(`✅ ${totalAdded.toLocaleString('fr-FR')} certificat(s) ajouté(s) pour ${comp}${totalRepares ? ` · ${totalRepares.toLocaleString('fr-FR')} N° réparé(s)` : ''}${ignores.length ? ` · ${ignores.length} déjà présent(s)` : ''}.`,
+          (totalAdded + totalRepares) > 0 ? 'success' : 'warn', 8000);
+    verifierCertificatsTronques();
     if (ignores.length) renderIgnores(comp, ignores);
   } catch (err) {
     // Le cache est rechargé depuis la base pour ne jamais diverger de ce qui est réellement stocké.
@@ -1699,7 +1782,7 @@ async function lancerPointage() {
   for (let i = 0; i < arriereData.length; i++) {
     if (pointageAbort) { addLog('warn', '⛔ Pointage interrompu par l\'utilisateur.'); break; }
     const row      = arriereData[i];
-    const certNorm = normCert(row['_TXT_' + certCol] !== '' && row['_TXT_' + certCol] !== undefined ? row['_TXT_' + certCol] : row[certCol]);
+    const certNorm = normCert(valeurIdentifiant(row[certCol], row['_TXT_' + certCol]));
     const pct      = Math.round(((i + 1) / arriereData.length) * 100);
     const fill     = document.getElementById('progressFill');
     fill.style.width = pct + '%'; fill.textContent = pct + '%';
