@@ -414,7 +414,7 @@
                         </div>
                         <div class="form-group">
                             <label>N° Assuré (chemise)</label>
-                            <input type="number" id="numeroClient" min="1" max="99" placeholder="01" oninput="apercuRepereSaisie()">
+                            <input type="number" id="numeroClient" min="1" max="999" placeholder="01" oninput="apercuRepereSaisie()">
                         </div>
                     </div>
                 </div>
@@ -424,7 +424,7 @@
                     <div class="form-grid">
                         <div class="form-group">
                             <label>N° Chemise</label>
-                            <input type="number" id="chemise" min="1" max="99" placeholder="01" oninput="apercuRepereSaisie()">
+                            <input type="number" id="chemise" min="1" max="999" placeholder="01" oninput="apercuRepereSaisie()">
                         </div>
                     </div>
                 </div>
@@ -703,7 +703,7 @@
                         <div id="champsRechercheFlotte">
                             <div class="form-group">
                                 <label>N° Chemise (FLOTTE)</label>
-                                <input type="text" id="rechercheNumChemise" placeholder="Ex : 05" maxlength="2">
+                                <input type="text" id="rechercheNumChemise" placeholder="Ex : 05" maxlength="3">
                             </div>
                         </div>
                         <div id="champsRechercheDivers" style="display:none;">
@@ -717,7 +717,7 @@
                                 </div>
                                 <div class="form-group">
                                     <label>N° Assuré</label>
-                                    <input type="text" id="rechercheNumClient" placeholder="Ex : 05" maxlength="2">
+                                    <input type="text" id="rechercheNumClient" placeholder="Ex : 05" maxlength="3">
                                 </div>
                             </div>
                         </div>
@@ -1969,7 +1969,7 @@ function comparerContrats(a, b, champ, sens) {
         const da = versDate(va), db = versDate(vb);
         return (((da ? da.getTime() : 0) - (db ? db.getTime() : 0))) * sens;
     }
-    return String(va || '').localeCompare(String(vb || ''), 'fr') * sens;
+    return String(va || '').localeCompare(String(vb || ''), 'fr', { numeric: true }) * sens;
 }
 
 function afficherListe() {
@@ -2483,15 +2483,15 @@ function ouvrirModalContrat(id) {
                             <option value="02" ${groupe === '02' ? 'selected' : ''}>02 — KAMAL DIV</option>
                         </select></div>
                     <div class="form-group"><label>N° Assuré</label>
-                        <input type="number" id="edClient" min="1" max="99" value="${parseInt(client, 10) || 1}" oninput="majApercuRepereEdition()"></div>
+                        <input type="number" id="edClient" min="1" max="999" value="${parseInt(client, 10) || 1}" oninput="majApercuRepereEdition()"></div>
                     <div class="form-group"><label>N° Véhicule</label>
-                        <input type="number" id="edVehiculeD" min="1" max="99" value="${parseInt(vehicule, 10) || 1}" oninput="majApercuRepereEdition()"></div>
+                        <input type="number" id="edVehiculeD" min="1" max="999" value="${parseInt(vehicule, 10) || 1}" oninput="majApercuRepereEdition()"></div>
                 </div>
                 <div id="edChampsFlotte" class="form-grid" style="display:${typeRepere === 'FLOTTE' ? 'grid' : 'none'};">
                     <div class="form-group"><label>N° Chemise</label>
-                        <input type="number" id="edChemise" min="1" max="99" value="${parseInt(chemise, 10) || 1}" oninput="majApercuRepereEdition()"></div>
+                        <input type="number" id="edChemise" min="1" max="999" value="${parseInt(chemise, 10) || 1}" oninput="majApercuRepereEdition()"></div>
                     <div class="form-group"><label>N° Véhicule</label>
-                        <input type="number" id="edVehiculeF" min="1" max="99" value="${parseInt(vehicule, 10) || 1}" oninput="majApercuRepereEdition()"></div>
+                        <input type="number" id="edVehiculeF" min="1" max="999" value="${parseInt(vehicule, 10) || 1}" oninput="majApercuRepereEdition()"></div>
                 </div>
 
                 <div class="alert alert-info" style="margin-top:14px;">
@@ -2874,7 +2874,7 @@ function fusionnerVehicules() {
         const bDest = groupeDest.includes(b) ? 0 : 1;
         if (aDest !== bDest) return aDest - bDest;
         const ca = getContratParId(a), cb = getContratParId(b);
-        return String(ca ? ca.repere : '').localeCompare(String(cb ? cb.repere : ''));
+        return String(ca ? ca.repere : '').localeCompare(String(cb ? cb.repere : ''), 'fr', { numeric: true });
     });
 
     // Repères des contrats qui ne participent PAS à la fusion : on ne doit pas les écraser.
@@ -3187,7 +3187,7 @@ function afficherModaleFiltresDoublons() {
         chemisesMap[cle].nb++;
         if (c.libelle) clients.add(String(c.libelle).trim());
     });
-    const chemises = Object.values(chemisesMap).sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+    const chemises = Object.values(chemisesMap).sort((a, b) => a.label.localeCompare(b.label, 'fr', { numeric: true }));
     const listeClients = Array.from(clients).sort((a, b) => a.localeCompare(b, 'fr'));
 
     document.body.insertAdjacentHTML('beforeend', `
@@ -3428,14 +3428,14 @@ function afficherResultatsChemise(vehicules, criteres) {
                     <input type="number" id="nouvelleAnnee" min="2000" max="2099" value="${esc(criteres.annee)}"></div>
                 ${criteres.type === 'FLOTTE' ? `
                 <div class="form-group"><label>Nouveau n° chemise</label>
-                    <input type="text" id="nouveauNumChemise" maxlength="2" value="${esc(criteres.numChemise)}"></div>` : `
+                    <input type="text" id="nouveauNumChemise" maxlength="3" value="${esc(criteres.numChemise)}"></div>` : `
                 <div class="form-group"><label>Nouveau groupe</label>
                     <select id="nouveauGroupe">
                         <option value="01" ${criteres.groupe === '01' ? 'selected' : ''}>01 — GROUPE 1</option>
                         <option value="02" ${criteres.groupe === '02' ? 'selected' : ''}>02 — KAMAL DIV</option>
                     </select></div>
                 <div class="form-group"><label>Nouveau n° assuré</label>
-                    <input type="text" id="nouveauNumClient" maxlength="2" value="${esc(criteres.numClient)}"></div>`}
+                    <input type="text" id="nouveauNumClient" maxlength="3" value="${esc(criteres.numClient)}"></div>`}
             </div>
             <button class="btn btn-primary" style="width:100%; margin-top:14px; justify-content:center;" onclick="previsualiserModification()">
                 👁️ Prévisualiser les modifications
@@ -3636,7 +3636,7 @@ function afficherListeChemises(filtreCie, filtreAnnee) {
             a.compagnie.localeCompare(b.compagnie) ||
             b.annee.localeCompare(a.annee) ||
             a.groupe.localeCompare(b.groupe) ||
-            a.numChemise.localeCompare(b.numChemise));
+            a.numChemise.localeCompare(b.numChemise, 'fr', { numeric: true }));
 
     window.__donneesChemises = liste;
     const nbVehicules = liste.reduce((s, ch) => s + ch.nbVehicules, 0);
@@ -4012,8 +4012,8 @@ function telechargerModeleExcel() {
         ['PRIME_TTC', 'OUI', 'Montant réel de la quittance, en FCFA. Ligne rejetée si vide ou égale à 0'],
         ['INFO_REGLT_CIE', 'OUI', 'Référence du règlement compagnie. Ex : VIR 001234, CHQ 5678. Ligne rejetée si vide ou valeur de remplissage (-, 0, N/A, EN ATTENTE…)'],
         ['GROUPE', 'si DIVERS', '01 (GROUPE 1) ou 02 (KAMAL DIV)'],
-        ['NUMERO_CLIENT', 'si DIVERS', 'N° de chemise de l\'assuré, 01 à 99'],
-        ['NUMERO_CHEMISE', 'si FLOTTE', 'N° de chemise de la flotte, 01 à 99'],
+        ['NUMERO_CLIENT', 'si DIVERS', 'N° de chemise de l\'assuré, 01 à 999'],
+        ['NUMERO_CHEMISE', 'si FLOTTE', 'N° de chemise de la flotte, 01 à 999'],
         [''],
         ['DOUBLON = même POLICE + IMMATRICULATION + DATE_EFFET + DATE_ECHEANCE + PRIME_TTC : ligne rejetée.'],
         ['Mêmes police, immatriculation et dates avec une PRIME_TTC différente : acceptée comme ligne distincte (avenant).'],
@@ -4092,12 +4092,14 @@ function traiterFichierExcel(event) {
     event.target.value = '';
 }
 
-/** N° de chemise / client : entier de 1 à 99, renvoyé sur 2 chiffres, ou null. */
+/** N° de chemise / client : entier de 1 à 999 (2 chiffres minimum : 05, 99, 100…), ou null. */
+const NUMERO_CHEMISE_MAX = 999;
 function lireNumeroChemise(texte) {
-    const t = String(texte || '').trim();
-    if (!/^\d{1,2}$/.test(t)) return null;
+    let t = String(texte || '').trim();
+    if (/^\d+[.,]0+$/.test(t)) t = t.replace(/[.,]0+$/, '');   // « 105.0 » lu depuis Excel
+    if (!/^\d{1,3}$/.test(t)) return null;
     const n = parseInt(t, 10);
-    return (n >= 1 && n <= 99) ? String(n).padStart(2, '0') : null;
+    return (n >= 1 && n <= NUMERO_CHEMISE_MAX) ? String(n).padStart(2, '0') : null;
 }
 
 /**
@@ -4138,14 +4140,14 @@ function validerDonneesExcel(lignes) {
         let chemise = null, groupe = null, client = null;
         if (type === 'FLOTTE') {
             if (!L.texte('NUMERO_CHEMISE')) err.push('NUMERO_CHEMISE requis pour TYPE_CLASSEMENT = FLOTTE');
-            else if (!(chemise = lireNumeroChemise(L.texte('NUMERO_CHEMISE')))) err.push(`NUMERO_CHEMISE doit être un nombre de 01 à 99 (trouvé « ${L.texte('NUMERO_CHEMISE')} »)`);
+            else if (!(chemise = lireNumeroChemise(L.texte('NUMERO_CHEMISE')))) err.push(`NUMERO_CHEMISE doit être un nombre de 01 à 999 (trouvé « ${L.texte('NUMERO_CHEMISE')} »)`);
         }
         if (type === 'DIVERS') {
             groupe = pad2(L.texte('GROUPE'));
             if (!L.texte('GROUPE')) err.push('GROUPE requis pour TYPE_CLASSEMENT = DIVERS');
             else if (groupe !== '01' && groupe !== '02') err.push(`GROUPE doit valoir 01 ou 02 (trouvé « ${L.texte('GROUPE')} »)`);
             if (!L.texte('NUMERO_CLIENT')) err.push('NUMERO_CLIENT requis pour TYPE_CLASSEMENT = DIVERS');
-            else if (!(client = lireNumeroChemise(L.texte('NUMERO_CLIENT')))) err.push(`NUMERO_CLIENT doit être un nombre de 01 à 99 (trouvé « ${L.texte('NUMERO_CLIENT')} »)`);
+            else if (!(client = lireNumeroChemise(L.texte('NUMERO_CLIENT')))) err.push(`NUMERO_CLIENT doit être un nombre de 01 à 999 (trouvé « ${L.texte('NUMERO_CLIENT')} »)`);
         }
 
         const dEffet = lireDateCellule(L.brut('DATE_EFFET'), L.texte('DATE_EFFET'));
